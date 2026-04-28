@@ -20,28 +20,6 @@
 
 ---
 
-## 🏷️ Suggested GitHub Topics
-
-Add these to the repository topic list so people can find the project:
-
-```text
-ai
-chatbot
-php
-mysql
-ollama
-openai
-anthropic
-gemini
-self-hosted
-chatgpt-clone
-api
-teams
-admin-dashboard
-2fa
-bootstrap
-```
-
 ## ✨ Overview
 
 **RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, API keys, 2FA-protected team access, admin controls, and a simple authenticated chat API.
