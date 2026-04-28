@@ -272,9 +272,6 @@ privacy.php            Privacy page
 
 ## 🛡️ Security Notes
 
-> [!WARNING]
-> Never commit real database credentials, API keys, Stripe secrets, or production config files.
-
 - Keep `config/app.php` private.
 - Use HTTPS in production.
 - Use strong admin passwords.
@@ -304,7 +301,7 @@ Before opening a pull request:
 
 ## 📜 License
 
-Add your preferred license here before publishing the repository.
+![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 ---
 
