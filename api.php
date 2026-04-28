@@ -61,6 +61,11 @@ function db_column_exists(string $table, string $column): bool
     } catch (Throwable $e) { return false; }
 }
 
+function api_teams_require_2fa(): bool
+{
+    return defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true;
+}
+
 function ensure_auth_security_schema(): void
 {
     try {
@@ -171,7 +176,7 @@ if (!$key || !empty($key['revoked_at'])) {
     json_response(['ok' => false, 'error' => 'Invalid API key'], 401);
 }
 
-if (!empty($key['team_id']) && (empty($key['two_factor_enabled_at']) || empty($key['two_factor_secret']))) {
+if (api_teams_require_2fa() && !empty($key['team_id']) && (empty($key['two_factor_enabled_at']) || empty($key['two_factor_secret']))) {
     json_response(['ok' => false, 'error' => 'Team API access requires 2FA on the owning account'], 403);
 }
 

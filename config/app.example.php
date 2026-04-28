@@ -11,5 +11,6 @@ defined('AI_API_KEY') || define('AI_API_KEY', '');
 defined('OLLAMA_URL') || define('OLLAMA_URL', AI_BASE_URL);
 defined('OLLAMA_MODEL') || define('OLLAMA_MODEL', AI_MODEL);
 defined('STRIPE_SECRET_KEY') || define('STRIPE_SECRET_KEY', '');
+defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', true);
 defined('APP_NAME') || define('APP_NAME', 'RookGPT');
 defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');

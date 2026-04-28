@@ -35,6 +35,7 @@ function php_config(array $s): string {
         "defined('OLLAMA_URL') || define('OLLAMA_URL', AI_BASE_URL);\n" .
         "defined('OLLAMA_MODEL') || define('OLLAMA_MODEL', AI_MODEL);\n" .
         "defined('STRIPE_SECRET_KEY') || define('STRIPE_SECRET_KEY', " . $export($s['stripe_secret_key'] ?? '') . ");\n" .
+        "defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', true);\n" .
         "defined('APP_NAME') || define('APP_NAME', 'RookGPT');\n" .
         "defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');\n";
 }

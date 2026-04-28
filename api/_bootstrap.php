@@ -22,6 +22,7 @@ function db_execute(string $sql, string $types = '', array $params = []): int { 
 function db_insert(string $sql, string $types = '', array $params = []): int { $stmt = db()->prepare($sql); if ($types !== '' && $params !== []) $stmt->bind_param($types, ...$params); $stmt->execute(); $id = (int) db()->insert_id; $stmt->close(); return $id; }
 function redirect_to(string $path): never { header('Location: ' . $path); exit; }
 function is_post(): bool { return ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'; }
+function api_teams_require_2fa(): bool { return defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true; }
 
 function db_column_exists_auth(string $table, string $column): bool
 {
@@ -62,9 +63,50 @@ function generate_api_key_plaintext(): string { return 'rgpt_' . bin2hex(random_
 function mask_api_key(?string $plain): string { $plain = trim((string)$plain); if ($plain === '') return 'Unavailable'; $tail = strlen($plain) >= 4 ? substr($plain, -4) : $plain; $prefix = str_starts_with($plain, 'rgpt_team_') ? 'rgpt_team_' : (str_starts_with($plain, 'rk_live_') ? 'rk_live_' : (str_starts_with($plain, 'rgpt_') ? 'rgpt_' : substr($plain, 0, min(8, strlen($plain))))); return $prefix . '****' . $tail; }
 function create_api_key(int $userId, string $name): array { ensure_api_key_preview_schema(); $plain = generate_api_key_plaintext(); $hash = hash('sha256', $plain); $prefix = api_key_prefix($plain); $suffix = api_key_suffix($plain); $id = db_insert('INSERT INTO api_keys (user_id, name, key_hash, key_prefix, key_suffix, created_at) VALUES (?, ?, ?, ?, ?, NOW())', 'issss', [$userId, $name, $hash, $prefix, $suffix]); return ['id'=>$id, 'plain'=>$plain]; }
 function fetch_api_keys(int $userId): array { return db_fetch_all('SELECT ak.id, ak.name, ak.key_prefix, ak.key_suffix, ak.last_used_at, ak.revoked_at, ak.created_at, COUNT(al.id) AS request_count, COALESCE(SUM(al.prompt_eval_count + al.eval_count), 0) AS token_count, MAX(al.created_at) AS last_request_at FROM api_keys ak LEFT JOIN api_logs al ON al.api_key_id = ak.id WHERE ak.user_id = ? AND ak.team_id IS NULL GROUP BY ak.id, ak.name, ak.key_prefix, ak.key_suffix, ak.last_used_at, ak.revoked_at, ak.created_at ORDER BY ak.id DESC', 'i', [$userId]); }
-function fetch_playground_key_options(int $userId, string $createdKey = ''): array { $options = []; if (trim($createdKey) !== '') $options[] = ['label'=>'Newly created key', 'masked'=>mask_api_key($createdKey), 'value'=>$createdKey, 'type'=>'member']; return $options; }
+function fetch_playground_key_options(int $userId, string $createdKey = ''): array {
+    ensure_api_key_preview_schema();
+    $options = [];
+    foreach (fetch_api_keys($userId) as $key) {
+        if (!empty($key['revoked_at'])) continue;
+        $options[] = [
+            'label' => (string)($key['name'] ?? ('Key #' . (int)$key['id'])),
+            'masked' => masked_api_key_from_parts($key['key_prefix'] ?? '', $key['key_suffix'] ?? '', (int)$key['id']),
+            'value' => 'user:' . (int)$key['id'],
+            'type' => 'member',
+            'available' => true,
+        ];
+    }
+    try {
+        $teamKeys = db_fetch_all(
+            'SELECT ak.id, ak.name, ak.key_prefix, ak.key_suffix, t.name AS team_name
+             FROM api_keys ak
+             INNER JOIN teams t ON t.id = ak.team_id
+             INNER JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ?
+             WHERE ak.team_id IS NOT NULL
+               AND ak.revoked_at IS NULL
+               AND (t.owner_user_id = ? OR tm.can_view_api_keys = 1 OR tm.can_manage_api_keys = 1)
+             ORDER BY ak.id DESC',
+            'ii',
+            [$userId, $userId]
+        );
+    } catch (Throwable $e) {
+        $teamKeys = [];
+    }
+    foreach ($teamKeys as $key) {
+        $teamName = trim((string)($key['team_name'] ?? 'Team'));
+        $keyName = trim((string)($key['name'] ?? ('Key #' . (int)$key['id'])));
+        $options[] = [
+            'label' => $teamName . ' · ' . $keyName,
+            'masked' => masked_api_key_from_parts($key['key_prefix'] ?? '', $key['key_suffix'] ?? '', (int)$key['id']),
+            'value' => 'team:' . (int)$key['id'],
+            'type' => 'team',
+            'available' => true,
+        ];
+    }
+    return $options;
+}
 function update_api_key_state(int $userId, int $keyId, bool $enabled): void { db_execute('UPDATE api_keys SET revoked_at = ' . ($enabled ? 'NULL' : 'NOW()') . ' WHERE id = ? AND user_id = ?', 'ii', [$keyId, $userId]); }
-function delete_api_key(int $userId, int $keyId): void { db_execute('DELETE FROM api_keys WHERE id = ? AND user_id = ?', 'ii', [$keyId, $userId]); }
+function delete_api_key(int $userId, int $keyId): void { if ($keyId <= 0) return; db_execute('DELETE FROM api_logs WHERE api_key_id = ? AND user_id = ?', 'ii', [$keyId, $userId]); db_execute('DELETE FROM api_keys WHERE id = ? AND user_id = ? AND team_id IS NULL', 'ii', [$keyId, $userId]); }
 function fetch_daily_usage(int $userId, int $days = 7): array { $rows = db_fetch_all('SELECT DATE(created_at) AS day, COUNT(*) AS requests, COALESCE(SUM(prompt_eval_count + eval_count), 0) AS tokens FROM api_logs WHERE user_id = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) GROUP BY DATE(created_at) ORDER BY day ASC', 'ii', [$userId, $days - 1]); $indexed = []; foreach ($rows as $row) $indexed[(string)$row['day']] = $row; $out = []; $start = new DateTimeImmutable('-' . ($days - 1) . ' days'); for ($i=0; $i<$days; $i++) { $day = $start->modify('+' . $i . ' days')->format('Y-m-d'); $row = $indexed[$day] ?? ['requests'=>0,'tokens'=>0]; $out[] = ['label'=>(new DateTimeImmutable($day))->format('d M'), 'requests'=>(int)($row['requests'] ?? 0), 'tokens'=>(int)($row['tokens'] ?? 0)]; } return $out; }
 function fetch_usage_totals(int $userId): array { $row = db_fetch_one('SELECT COUNT(*) AS requests, COALESCE(SUM(prompt_eval_count + eval_count), 0) AS tokens, COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) AS failures FROM api_logs WHERE user_id = ?', 'i', [$userId]) ?? []; return ['requests'=>(int)($row['requests'] ?? 0), 'tokens'=>(int)($row['tokens'] ?? 0), 'failures'=>(int)($row['failures'] ?? 0)]; }
 function fetch_today_api_call_count(int $userId): int { $row = db_fetch_one('SELECT COUNT(*) AS total FROM api_logs WHERE user_id = ? AND DATE(created_at) = CURDATE()', 'i', [$userId]); return (int)($row['total'] ?? 0); }
@@ -103,7 +145,7 @@ function api_footer(): void { ?></div></main></div>
   document.addEventListener('submit', function(event){
     const form = event.target.closest('form[data-confirm-title], form[data-confirm-message]');
     if (!form || form.dataset.confirmed === '1') return;
-    event.preventDefault(); pendingForm = form;
+    event.preventDefault(); pendingForm = form; pendingForm._rookSubmitter = event.submitter || document.activeElement;
     const title = form.dataset.confirmTitle || 'Confirm action';
     const message = form.dataset.confirmMessage || 'Are you sure you want to continue?';
     const action = form.dataset.confirmAction || 'Confirm';
@@ -111,7 +153,25 @@ function api_footer(): void { ?></div></main></div>
     if (titleEl) titleEl.textContent = title; if (bodyEl) bodyEl.textContent = message; if (submit) submit.textContent = action;
     const modal = modalInstance('apiConfirmModal'); if (modal) modal.show();
   }, true);
-  document.getElementById('apiConfirmSubmit')?.addEventListener('click', function(){ if (!pendingForm) return; pendingForm.dataset.confirmed = '1'; const modal = modalInstance('apiConfirmModal'); if (modal) modal.hide(); pendingForm.submit(); });
+  document.getElementById('apiConfirmSubmit')?.addEventListener('click', function(){
+    if (!pendingForm) return;
+    const submitter = pendingForm._rookSubmitter || pendingForm.querySelector('button[type=submit], input[type=submit]');
+    if (submitter && submitter.name) {
+      let hidden = pendingForm.querySelector('input[type=hidden][data-confirm-submitter="1"]');
+      if (!hidden) {
+        hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.dataset.confirmSubmitter = '1';
+        pendingForm.appendChild(hidden);
+      }
+      hidden.name = submitter.name;
+      hidden.value = submitter.value || '1';
+    }
+    pendingForm.dataset.confirmed = '1';
+    const modal = modalInstance('apiConfirmModal');
+    if (modal) modal.hide();
+    if (pendingForm.requestSubmit) pendingForm.requestSubmit(); else pendingForm.submit();
+  });
 })();
 </script></body></html><?php }
 function handle_key_post(array $user): void { if (!is_post()) return; if (isset($_POST['create_key'])) { $name = trim((string)($_POST['key_name'] ?? '')); if ($name === '') $name = 'Production key'; $newKey = create_api_key((int)$user['id'], mb_substr($name, 0, 100)); $_SESSION['api_plain_key'] = (string)$newKey['plain']; redirect_to('/api/keys'); } if (isset($_POST['toggle_key'])) { update_api_key_state((int)$user['id'], (int)($_POST['key_id'] ?? 0), ((string)($_POST['target_state'] ?? 'enable')) === 'enable'); $_SESSION['api_flash'] = 'API key state updated.'; redirect_to('/api/keys'); } if (isset($_POST['delete_key'])) { delete_api_key((int)$user['id'], (int)($_POST['key_id'] ?? 0)); $_SESSION['api_flash'] = 'API key deleted.'; redirect_to('/api/keys'); } }

@@ -96,6 +96,7 @@ function ensure_auth_security_schema(): void
 }
 function clear_local_session(?string $flash = null): void { $_SESSION=[]; session_destroy(); session_start(); if($flash) $_SESSION['flash']=$flash; }
 function two_factor_enabled_for_user(array $user): bool { return !empty($user['two_factor_enabled_at']) && !empty($user['two_factor_secret']); }
+function teams_require_2fa(): bool { return defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true; }
 function ensure_team_schema(): void
 {
     try {
@@ -470,7 +471,7 @@ if ((string) ($user['plan'] ?? 'free') !== 'business') {
     $_SESSION['flash'] = 'Teams are only available on the Business plan.';
     redirect_to('index.php');
 }
-if (!two_factor_enabled_for_user($user)) {
+if (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
     $_SESSION['flash'] = 'Enable 2FA in Account settings before using Teams.';
     redirect_to('/');
 }

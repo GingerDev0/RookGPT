@@ -3,7 +3,8 @@ require __DIR__ . '/_bootstrap.php';
 [$user, $planInfo] = require_api_user();
 $createdKey = (string)($_SESSION['api_plain_key'] ?? '');
 $apiUrl = app_base_url() . '/api';
-$snippetKey = $createdKey !== '' ? $createdKey : 'YOUR_API_KEY';
+$playgroundRunUrl = '/api/playground-run.php';
+$snippetKey = 'YOUR_API_KEY';
 $keyOptions = fetch_playground_key_options((int)$user['id'], $createdKey);
 $defaultSystemPrompt = DEFAULT_API_SYSTEM_PROMPT;
 api_header('API playground', $user, $planInfo, 'playground');
@@ -35,14 +36,16 @@ api_header('API playground', $user, $planInfo, 'playground');
           <label for="playgroundKey">Bearer key</label>
           <select class="form-select" id="playgroundKey">
             <?php if ($keyOptions): ?>
-              <?php foreach ($keyOptions as $option): ?>
-                <option value="<?= e((string)$option['value']) ?>" data-kind="<?= e((string)$option['type']) ?>"><?= e(ucfirst((string)$option['type'])) ?> · <?= e((string)$option['label']) ?> · <?= e((string)$option['masked']) ?></option>
+              <?php foreach ($keyOptions as $option): $available = !empty($option['available']); ?>
+                <option value="<?= e((string)$option['value']) ?>" data-kind="<?= e((string)$option['type']) ?>" data-masked="<?= e((string)$option['masked']) ?>" <?= $available ? '' : 'disabled' ?>><?= e(ucfirst((string)$option['type'])) ?> · <?= e((string)$option['label']) ?> · <?= e((string)$option['masked']) ?></option>
               <?php endforeach; ?>
             <?php else: ?>
-              <option value="">No stored keys available</option>
+              <option value="" disabled>No stored keys available</option>
             <?php endif; ?>
+            <option value="__paste__">Paste a bearer key...</option>
           </select>
-          <div class="play-inline-note">Keys are masked in the dropdown. Create or rotate keys first if nothing appears here.</div>
+          <input class="form-control mt-2 d-none" type="password" id="playgroundCustomKey" placeholder="Paste rgpt_... key here" autocomplete="off">
+          <div class="play-inline-note">Stored member and team keys are selected by server-side reference. Full keys are never stored in your browser.</div>
         </div>
         <div>
           <label>Options</label>
@@ -123,7 +126,7 @@ api_header('API playground', $user, $planInfo, 'playground');
         <button class="btn btn-outline-light" type="button" id="copySnippetBtn"><i class="fa-regular fa-copy me-2"></i>Copy snippet</button>
         <button class="btn btn-outline-light" type="button" id="syncSnippetBtn"><i class="fa-solid fa-arrows-rotate me-2"></i>Sync from inputs</button>
       </div>
-      <div class="play-inline-note">Shell snippets can be edited and run. Other languages are generated for copy/paste and the Run button uses the current key/body state.</div>
+      <div class="play-inline-note">Snippets use <code>YOUR_API_KEY</code> unless you paste a key. The Run button can use selected stored keys securely without exposing them to the browser.</div>
     </div>
     <pre class="play-output" id="playgroundOutput">No request fired yet.</pre>
   </section>
@@ -131,8 +134,11 @@ api_header('API playground', $user, $planInfo, 'playground');
 
 <script>
 const apiBaseUrl = <?= json_encode($apiUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+const playgroundRunUrl = <?= json_encode($playgroundRunUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+const playgroundCsrfToken = <?= json_encode(csrf_token(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
 const defaultSnippetKey = <?= json_encode($snippetKey, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
 const keyEl = document.getElementById('playgroundKey');
+const customKeyEl = document.getElementById('playgroundCustomKey');
 const systemPromptEl = document.getElementById('playgroundSystemPrompt');
 const temperatureEl = document.getElementById('playgroundTemperature');
 const topPEl = document.getElementById('playgroundTopP');
@@ -147,6 +153,23 @@ const moreLangButtons = Array.from(document.querySelectorAll('#moreLangMenu [dat
 const moreLangBtn = document.getElementById('moreLangBtn');
 let activeLanguage = 'shell';
 
+function maskBearerKey(value) {
+  const key = String(value || '').trim();
+  if (!key) return '';
+  const prefix = key.startsWith('rgpt_team_') ? 'rgpt_team_' : (key.startsWith('rk_live_') ? 'rk_live_' : (key.startsWith('rgpt_') ? 'rgpt_' : key.slice(0, Math.min(8, key.length))));
+  return prefix + '****' + key.slice(-4);
+}
+function selectedKeyLabel() {
+  if (!keyEl) return '';
+  const option = keyEl.options[keyEl.selectedIndex];
+  if (!option) return '';
+  if (option.value === '__paste__') return customKeyEl?.value?.trim() || 'PASTE_YOUR_API_KEY';
+  return option.dataset.masked || option.textContent.trim() || 'SELECTED_SERVER_KEY';
+}
+function syncCustomKeyVisibility() {
+  if (!customKeyEl || !keyEl) return;
+  customKeyEl.classList.toggle('d-none', keyEl.value !== '__paste__');
+}
 function numericValue(input, fallback) {
   const value = Number(input?.value);
   return Number.isFinite(value) ? value : fallback;
@@ -164,8 +187,19 @@ function buildDefaultBody() {
 function readBodyJson() { try { return JSON.parse(bodyEl?.value || '{}'); } catch (_) { return null; } }
 function syncBodyFromPrompt() { if (bodyEl) bodyEl.value = JSON.stringify(buildDefaultBody(), null, 2); }
 function normalizeJsonString(value) { return JSON.stringify(JSON.parse(value), null, 2); }
+function selectedKeyRef() {
+  return keyEl?.value?.trim() || '';
+}
+function selectedBearerKey() {
+  const selected = selectedKeyRef();
+  if (selected === '__paste__') return customKeyEl?.value?.trim() || '';
+  return defaultSnippetKey || 'YOUR_API_KEY';
+}
+function selectedPlainKey() {
+  return selectedKeyRef() === '__paste__' ? (customKeyEl?.value?.trim() || '') : '';
+}
 function currentRequestParts() {
-  const key = keyEl?.value.trim() || defaultSnippetKey || 'YOUR_API_KEY';
+  const key = selectedBearerKey();
   const rawBody = bodyEl?.value?.trim() || JSON.stringify(buildDefaultBody(), null, 2);
   return { key, rawBody, endpoint: apiBaseUrl };
 }
@@ -216,12 +250,22 @@ function syncSnippetFromInputs() {
   setActiveLanguage(activeLanguage);
 }
 async function runRequestFromState() {
-  const key = keyEl?.value.trim() || '';
   const body = readBodyJson();
-  if (!key || !body) { outputEl.textContent = 'Need a bearer key and valid JSON body.'; return; }
+  const keyRef = selectedKeyRef();
+  const keyPlain = selectedPlainKey();
+  if ((!keyRef || keyRef === '__paste__') && !keyPlain) { outputEl.textContent = 'Choose a stored key or paste a bearer key.'; return; }
+  if (!body) { outputEl.textContent = 'Need a valid JSON body.'; return; }
   outputEl.textContent = 'Running request...';
   try {
-    const response = await fetch(apiBaseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key }, body: JSON.stringify(body) });
+    const response = await fetch(playgroundRunUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': playgroundCsrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ key_ref: keyRef, key_plain: keyPlain, body })
+    });
     const text = await response.text();
     try { outputEl.textContent = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { outputEl.textContent = text; }
   } catch (error) { outputEl.textContent = 'Request failed: ' + (error?.message || 'Unknown error'); }
@@ -259,16 +303,14 @@ function parseShellSnippet(rawSnippet) {
   return { endpoint: (urlMatch?.[1] || apiBaseUrl).trim(), key: authMatch[1].trim(), body: JSON.parse(shellUnquoteSingleQuoted(payload)) };
 }
 async function runCurrentSnippet() {
-  if (activeLanguage === 'shell' && snippetEl) {
+  if (activeLanguage === 'shell' && snippetEl && selectedKeyRef() === '__paste__') {
     try {
       const parsed = parseShellSnippet(snippetEl.value);
-      if (!parsed) throw new Error('Could not parse the curl snippet.');
-      outputEl.textContent = 'Running request...';
-      const response = await fetch(parsed.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + parsed.key }, body: JSON.stringify(parsed.body) });
-      const text = await response.text();
-      try { outputEl.textContent = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { outputEl.textContent = text; }
-      return;
-    } catch (error) { outputEl.textContent = 'Snippet run failed: ' + (error?.message || 'Unknown error'); return; }
+      if (parsed && parsed.key) {
+        if (customKeyEl) customKeyEl.value = parsed.key;
+        if (bodyEl) bodyEl.value = JSON.stringify(parsed.body, null, 2);
+      }
+    } catch (_) {}
   }
   await runRequestFromState();
 }
@@ -277,7 +319,8 @@ document.getElementById('resetBodyBtn')?.addEventListener('click', () => { syncB
 document.getElementById('runSnippetBtn')?.addEventListener('click', runCurrentSnippet);
 document.getElementById('copySnippetBtn')?.addEventListener('click', (event) => { window.copyApiText(snippetEl?.value || '', event.currentTarget); });
 document.getElementById('syncSnippetBtn')?.addEventListener('click', syncSnippetFromInputs);
-keyEl?.addEventListener('input', syncSnippetFromInputs);
+keyEl?.addEventListener('input', () => { syncCustomKeyVisibility(); syncSnippetFromInputs(); });
+customKeyEl?.addEventListener('input', syncSnippetFromInputs);
 promptEl?.addEventListener('input', () => { const body = readBodyJson(); if (body && Array.isArray(body.messages) && body.messages[0]) { body.messages[0].content = promptEl.value; bodyEl.value = JSON.stringify(body, null, 2); } syncSnippetFromInputs(); });
 thinkEl?.addEventListener('change', () => { syncBodyOptionsFromControls(); syncSnippetFromInputs(); });
 systemPromptEl?.addEventListener('input', () => { syncBodyOptionsFromControls(); syncSnippetFromInputs(); });
@@ -287,6 +330,7 @@ topKEl?.addEventListener('input', () => { syncBodyOptionsFromControls(); syncSni
 bodyEl?.addEventListener('input', syncSnippetFromInputs);
 primaryLangButtons.forEach((button) => button.addEventListener('click', () => setActiveLanguage(button.dataset.lang)));
 moreLangButtons.forEach((button) => button.addEventListener('click', () => setActiveLanguage(button.dataset.lang)));
+syncCustomKeyVisibility();
 syncBodyFromPrompt();
 setActiveLanguage('shell');
 </script>

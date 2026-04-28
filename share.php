@@ -191,12 +191,8 @@ if ($shareToken !== '') {
 <body class="rook-body rook-app rook-share is-authenticated">
 <div class="app">
   <aside class="sidebar">
-    <div class="sidebar-top"><a class="brand" href="/"><span class="brand-mark"><i class="fa-solid fa-chess-rook"></i></span><span><h1>RookGPT</h1><p>Shared snapshot</p></span></a><div class="workspace-label">Workspace</div></div>
+    <div class="sidebar-top"><div class="brand"><span class="brand-mark"><i class="fa-solid fa-chess-rook"></i></span><span><h1>RookGPT</h1><p>Shared snapshot</p></span></div><div class="workspace-label">Workspace</div></div>
     <div class="sidebar-body">
-      <a class="sidebar-link" href="/"><i class="fa-solid fa-comments"></i> Chat workspace</a>
-      <a class="sidebar-link" href="/api/"><i class="fa-solid fa-key"></i> API keys</a>
-      <a class="sidebar-link" href="/teams/"><i class="fa-solid fa-users"></i> Teams</a>
-      <a class="sidebar-link" href="/upgrade"><i class="fa-solid fa-arrow-up-right-dots"></i> Upgrade</a>
       <div class="page-panel p-3 mt-auto"><div class="muted small">Mode</div><strong>Read-only</strong></div>
     </div>
   </aside>
