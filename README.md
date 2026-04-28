@@ -1,39 +1,84 @@
-# RookGPT
+<div align="center">
 
-RookGPT is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, API keys, 2FA-protected team access, admin controls, and a simple authenticated chat API.
+# ♜ RookGPT
 
-The app can run against a local Ollama model or a hosted AI provider such as OpenAI, Anthropic Claude, Google Gemini, Mistral, Cohere, Groq, Perplexity, xAI, or OpenRouter.
+### A self-hosted AI chat workspace for teams, APIs, admin control, 2FA, and multiple AI providers.
 
-## Features
+![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-Database-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
+![Apache](https://img.shields.io/badge/Apache-mod__rewrite-D22128?style=for-the-badge&logo=apache&logoColor=white)
+![Bootstrap](https://img.shields.io/badge/Bootstrap-UI-7952B3?style=for-the-badge&logo=bootstrap&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-Local%20AI-000000?style=for-the-badge&logo=ollama&logoColor=white)
 
-- Clean AI chat interface with conversation history
-- Automatic conversation title and preview generation
-- Image upload and pasted-image support for vision-capable models
-- Bootstrap image gallery for viewing uploaded chat images
-- User registration and login
-- Single-session enforcement to prevent the same user account being active across multiple devices at once
-- Two-factor authentication using authenticator apps and recovery codes
-- Teams area with members, conversations, activity, settings, and team API keys
-- Team API access gated behind 2FA
-- User API key management with masked key previews
-- Public JSON chat endpoint at `/api`
-- API dashboard, docs, playground, usage charts, and key management pages
-- Admin dashboard for users, plans, API keys, notifications, activity logs, and app settings
-- Installer wizard that writes `config/app.php`, imports the schema, creates the owner admin, and signs the admin in
-- Stripe secret key support for upgrade/checkout wiring
-- Extensionless routes through `.htaccess`
+![Status](https://img.shields.io/badge/status-active-brightgreen?style=flat-square)
+![Self Hosted](https://img.shields.io/badge/self--hosted-yes-blue?style=flat-square)
+![API](https://img.shields.io/badge/API-ready-purple?style=flat-square)
+![2FA](https://img.shields.io/badge/2FA-supported-orange?style=flat-square)
+![Teams](https://img.shields.io/badge/teams-supported-success?style=flat-square)
 
-## Tech Stack
+</div>
 
-- PHP 8+
-- MySQL or MariaDB
-- Apache with `mod_rewrite`
-- Bootstrap
-- Font Awesome
-- Chart.js
-- Ollama or a compatible hosted AI provider
+---
 
-## Requirements
+## 🏷️ Suggested GitHub Topics
+
+Add these to the repository topic list so people can find the project:
+
+```text
+ai
+chatbot
+php
+mysql
+ollama
+openai
+anthropic
+gemini
+self-hosted
+chatgpt-clone
+api
+teams
+admin-dashboard
+2fa
+bootstrap
+```
+
+## ✨ Overview
+
+**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, API keys, 2FA-protected team access, admin controls, and a simple authenticated chat API.
+
+The app can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
+
+## 🚀 Highlights
+
+- 💬 Clean AI chat interface with conversation history
+- 🧠 Automatic conversation title and preview generation
+- 🖼️ Image upload and pasted-image support for vision-capable models
+- 🔍 Bootstrap image gallery for viewing uploaded chat images
+- 👤 User registration and login
+- 🔐 Single-session enforcement to prevent the same user account being active across multiple devices at once
+- 🛡️ Two-factor authentication using authenticator apps and recovery codes
+- 👥 Teams area with members, conversations, activity, settings, and team API keys
+- 🔑 Team API access gated behind 2FA
+- 🧾 User API key management with masked key previews
+- 🌐 Public JSON chat endpoint at `/api`
+- 📚 API dashboard, docs, playground, usage charts, and key management pages
+- 🧰 Admin dashboard for users, plans, API keys, notifications, activity logs, and app settings
+- 🪄 Installer wizard that writes `config/app.php`, imports the schema, creates the owner admin, and signs the admin in
+- 💳 Stripe secret key support for upgrade/checkout wiring
+- 🔗 Extensionless routes through `.htaccess`
+
+## 🧱 Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | PHP 8.1+ |
+| Database | MySQL / MariaDB |
+| Server | Apache with `mod_rewrite` |
+| UI | Bootstrap, Font Awesome |
+| Charts | Chart.js |
+| AI | Ollama or hosted AI provider |
+
+## ✅ Requirements
 
 Make sure your server has:
 
@@ -56,19 +101,18 @@ For local AI, install and run Ollama, then pull a model such as:
 ollama pull gemma4:e4b
 ```
 
-## Installation
+## ⚡ Quick Start
 
 1. Upload the project files to your web server.
-
 2. Make sure Apache can read the project and write to `config/` while installing.
-
-3. Open the site in your browser. If `config/app.php` does not exist, the app redirects to:
+3. Open the site in your browser.
+4. If `config/app.php` does not exist, the app redirects to:
 
 ```text
 /install/
 ```
 
-4. Complete the installer:
+5. Complete the installer:
 
 - Enter database details
 - Choose an AI provider
@@ -76,11 +120,12 @@ ollama pull gemma4:e4b
 - Create the owner admin account
 - Optionally enter a Stripe secret key
 
-5. The installer imports `rook_chat.sql`, creates the database tables, writes `config/app.php`, creates the owner admin account, and signs the admin in automatically.
+The installer imports `rook_chat.sql`, creates the database tables, writes `config/app.php`, creates the owner admin account, and signs the admin in automatically.
 
-6. After installation, protect or remove the installer route in production if your deployment process allows it.
+> [!IMPORTANT]
+> After installation, protect or remove the installer route in production if your deployment process allows it.
 
-## Manual Configuration
+## ⚙️ Manual Configuration
 
 You can configure the app manually by copying:
 
@@ -118,7 +163,7 @@ Then import the schema:
 mysql -u your_user -p rook_chat < rook_chat.sql
 ```
 
-## Supported AI Providers
+## 🤖 Supported AI Providers
 
 RookGPT includes provider presets for:
 
@@ -137,7 +182,7 @@ RookGPT includes provider presets for:
 
 The installer and admin settings page can fetch available models from the selected provider when the endpoint and API key are valid.
 
-## Routes
+## 🧭 Routes
 
 | Route | Purpose |
 |---|---|
@@ -156,7 +201,7 @@ The installer and admin settings page can fetch available models from the select
 | `/terms` | Terms of Service |
 | `/privacy` | Privacy Policy |
 
-## API Usage
+## 🔌 API Usage
 
 The public API endpoint is:
 
@@ -209,7 +254,7 @@ curl -X POST https://your-domain.com/api \
 | `top_k` | integer | No | Ollama option; defaults to `64` |
 | `think` | boolean | No | Enables model thinking output when supported |
 
-## Plans and API Limits
+## 💼 Plans and API Limits
 
 The app currently recognises these plan levels:
 
@@ -222,13 +267,13 @@ The app currently recognises these plan levels:
 
 Admin users can manage user plans from the admin area.
 
-## Two-Factor Authentication
+## 🔐 Two-Factor Authentication
 
 RookGPT supports TOTP-based 2FA using apps such as Google Authenticator, Microsoft Authenticator, Authy, 1Password, or any compatible authenticator app.
 
 Team features require 2FA. Users can enable 2FA from account settings by scanning the QR code and saving recovery codes.
 
-## Project Structure
+## 📁 Project Structure
 
 ```text
 admin/                 Admin dashboard pages
@@ -247,9 +292,12 @@ privacy.php            Privacy page
 .htaccess              Apache routing rules
 ```
 
-## Security Notes
+## 🛡️ Security Notes
 
-- Keep `config/app.php` private and never commit real database credentials or API keys.
+> [!WARNING]
+> Never commit real database credentials, API keys, Stripe secrets, or production config files.
+
+- Keep `config/app.php` private.
 - Use HTTPS in production.
 - Use strong admin passwords.
 - Enable 2FA before using team features.
@@ -257,7 +305,7 @@ privacy.php            Privacy page
 - Ensure uploads are served safely and only expected image MIME types are accepted.
 - Restrict access to `/install/` after setup.
 
-## Development Notes
+## 🧪 Development Notes
 
 - The app uses `mysqli` prepared statements for database access.
 - `.htaccess` preserves the `Authorization` header so bearer tokens work with Apache/PHP.
@@ -265,7 +313,25 @@ privacy.php            Privacy page
 - Explicit `.php` browser requests are redirected to extensionless URLs for cleaner routes.
 - Provider model fetching is handled in `lib/ai_providers.php`.
 
-## License
+## 🤝 Contributing
+
+Contributions, issues, and feature suggestions are welcome.
+
+Before opening a pull request:
+
+1. Test the installer.
+2. Test login, registration, and chat.
+3. Check that `/api` still requires a valid bearer token.
+4. Make sure no secrets are committed.
+
+## 📜 License
 
 Add your preferred license here before publishing the repository.
 
+---
+
+<div align="center">
+
+Made for builders who want a sharp, self-hosted AI workspace.
+
+</div>
