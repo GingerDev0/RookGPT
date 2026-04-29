@@ -11,6 +11,8 @@ defined('AI_API_KEY') || define('AI_API_KEY', '');
 defined('OLLAMA_URL') || define('OLLAMA_URL', AI_BASE_URL);
 defined('OLLAMA_MODEL') || define('OLLAMA_MODEL', AI_MODEL);
 defined('STRIPE_SECRET_KEY') || define('STRIPE_SECRET_KEY', '');
+// Set this once and keep it stable. Changing it will make encrypted team chat history unreadable.
+defined('TEAM_CHAT_ENCRYPTION_KEY') || define('TEAM_CHAT_ENCRYPTION_KEY', 'change-me-to-a-64-character-random-secret');
 defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', true);
 defined('APP_NAME') || define('APP_NAME', 'RookGPT');
 defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');
