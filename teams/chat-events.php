@@ -43,6 +43,7 @@ while (!connection_aborted() && (time() - $startedAt) < 55) {
     }
 
     $aiUpdates = fetch_recent_team_chat_ai_updates($teamId, 6);
+    $typingUsers = fetch_team_chat_typing_users($teamId, (int) ($user['id'] ?? 0), 5);
     $deletions = fetch_recent_team_chat_deletions($teamId, 6);
     $deletedIds = [];
     $chatCleared = false;
@@ -53,6 +54,10 @@ while (!connection_aborted() && (time() - $startedAt) < 55) {
             $deletedIds[] = (int) $deletion['message_id'];
         }
     }
+    $send('typing', ['users' => array_map(static function (array $typingUser): array {
+        return ['user_id' => (int) ($typingUser['user_id'] ?? 0), 'username' => (string) ($typingUser['username'] ?? 'Team member')];
+    }, $typingUsers)]);
+
     if ($aiUpdates || $deletedIds || $chatCleared) {
         $send('chat', [
             'messages' => $aiUpdates,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 session_start();
 require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/security.php';
+require_once __DIR__ . '/../lib/plans.php';
 csrf_bootstrap_web();
 date_default_timezone_set('Europe/London');
 
@@ -52,6 +53,7 @@ function ensure_admin_schema(): void
 function ensure_user_admin_columns(): void
 {
     try {
+        try { db()->query("ALTER TABLE users MODIFY COLUMN plan VARCHAR(64) NOT NULL DEFAULT 'free'"); } catch (Throwable $e) {}
         if (!db_column_exists('users', 'plan_expires_at')) db()->query('ALTER TABLE users ADD COLUMN plan_expires_at DATETIME NULL AFTER plan');
         if (!db_column_exists('users', 'plan_billing_period')) db()->query("ALTER TABLE users ADD COLUMN plan_billing_period ENUM('monthly','annual','team','manual') NULL AFTER plan_expires_at");
         if (!db_column_exists('users', 'thinking_enabled')) db()->query('ALTER TABLE users ADD COLUMN thinking_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER plan_billing_period');
@@ -107,6 +109,7 @@ function ensure_api_key_preview_schema(): void { try { if (!db_column_exists_aut
 function ensure_auth_security_schema(): void
 {
     try {
+        try { db()->query("ALTER TABLE users MODIFY COLUMN plan VARCHAR(64) NOT NULL DEFAULT 'free'"); } catch (Throwable $e) {}
         if (!db_column_exists_auth('users', 'current_session_token')) db()->query("ALTER TABLE users ADD COLUMN current_session_token VARCHAR(128) NULL AFTER custom_prompt");
         if (!db_column_exists_auth('users', 'session_rotated_at')) db()->query("ALTER TABLE users ADD COLUMN session_rotated_at DATETIME NULL AFTER current_session_token");
         if (!db_column_exists_auth('users', 'two_factor_secret')) db()->query("ALTER TABLE users ADD COLUMN two_factor_secret VARCHAR(64) NULL AFTER session_rotated_at");
@@ -128,20 +131,120 @@ function current_user(): ?array
 function is_admin_user(int $userId): bool { $row = db_fetch_one('SELECT id FROM admins WHERE user_id = ? AND is_active = 1 LIMIT 1', 'i', [$userId]); return (bool) $row; }
 function bootstrap_first_admin(array $user): void { $row = db_fetch_one('SELECT COUNT(*) AS total FROM admins WHERE is_active = 1'); if ((int)($row['total'] ?? 0) === 0) db_insert('INSERT INTO admins (user_id, role, is_active, created_by_user_id) VALUES (?, "owner", 1, ?)', 'ii', [(int)$user['id'], (int)$user['id']]); }
 function log_admin_action(int $adminUserId, string $action, string $targetType, ?int $targetId = null, string $details = ''): void { try { db_insert('INSERT INTO admin_activity_logs (admin_user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)', 'issis', [$adminUserId, $action, $targetType, $targetId, $details]); } catch (Throwable $e) {} }
-function require_admin(): array { ensure_admin_schema(); ensure_notifications_schema(); ensure_user_admin_columns(); $user = current_user(); if (!$user) redirect_to('../'); bootstrap_first_admin($user); if (!is_admin_user((int)$user['id'])) redirect_to('../'); return $user; }
+function require_admin(): array { ensure_admin_schema(); ensure_notifications_schema(); ensure_user_admin_columns(); ensure_billing_schema(); $user = current_user(); if (!$user) redirect_to('../'); bootstrap_first_admin($user); if (!is_admin_user((int)$user['id'])) redirect_to('../'); return $user; }
 function create_notification(int $userId, string $title, string $body, int $adminUserId): int { ensure_notifications_schema(); return db_insert('INSERT INTO notifications (user_id, created_by_user_id, type, title, body, created_at) VALUES (?, ?, "system", ?, ?, NOW())', 'iiss', [$userId, $adminUserId, $title, $body]); }
 function page_num(string $key): int { return max(1, (int)($_GET[$key] ?? 1)); }
 function page_offset(int $page): int { return max(0, ($page - 1) * ADMIN_PAGE_SIZE); }
 function pagination_links(string $baseUrl, string $pageKey, int $page, int $total, array $extra = []): string { $pages = max(1, (int)ceil($total / ADMIN_PAGE_SIZE)); if ($pages <= 1) return ''; $start = max(1, $page - 2); $end = min($pages, $start + 4); $start = max(1, $end - 4); $html = '<nav class="d-flex gap-2 flex-wrap mt-3" aria-label="Pagination">'; for ($i = $start; $i <= $end; $i++) { $params = array_merge($extra, [$pageKey => $i]); $href = $baseUrl . ($params ? '?' . http_build_query($params) : ''); $class = $i === $page ? 'btn btn-rook btn-sm' : 'btn btn-outline-light btn-sm'; $html .= '<a class="' . $class . '" href="' . e($href) . '">' . $i . '</a>'; } return $html . '</nav>'; }
-function plan_label(string $plan): string { return ['free'=>'Free','plus'=>'Plus','pro'=>'Pro','business'=>'Business'][$plan] ?? 'Free'; }
+function plan_label(string $plan): string { return rook_plan_label($plan); }
 function masked_key(?string $plain, int $id): string { $plain = trim((string)$plain); return ($plain !== '' && strlen($plain) >= 12) ? substr($plain, 0, 8) . '****' . substr($plain, -4) : 'key #' . $id; }
 function generate_api_key_plaintext(): string { return 'rgpt_' . bin2hex(random_bytes(24)); }
 
+function db_index_exists(string $table, string $index): bool { $row = db_fetch_one('SELECT COUNT(*) AS total FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1', 'ss', [$table, $index]); return (int)($row['total'] ?? 0) > 0; }
+
+function ensure_billing_schema(): void
+{
+    try {
+        db()->query("CREATE TABLE IF NOT EXISTS promo_codes (
+          id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+          code VARCHAR(64) NOT NULL,
+          description VARCHAR(255) NULL,
+          discount_type ENUM('percent','fixed') NOT NULL DEFAULT 'percent',
+          discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          applies_to_plan VARCHAR(64) NOT NULL DEFAULT 'any',
+          applies_to_period ENUM('any','monthly','annual') NOT NULL DEFAULT 'any',
+          max_redemptions INT UNSIGNED NULL,
+          redeemed_count INT UNSIGNED NOT NULL DEFAULT 0,
+          starts_at DATETIME NULL,
+          expires_at DATETIME NULL,
+          is_active TINYINT(1) NOT NULL DEFAULT 1,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (id), UNIQUE KEY uniq_promo_codes_code (code), KEY idx_promo_codes_active (is_active), KEY idx_promo_codes_dates (starts_at, expires_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $columns = [
+            'description' => "ALTER TABLE promo_codes ADD COLUMN description VARCHAR(255) NULL AFTER code",
+            'discount_type' => "ALTER TABLE promo_codes ADD COLUMN discount_type ENUM('percent','fixed') NOT NULL DEFAULT 'percent' AFTER description",
+            'discount_value' => "ALTER TABLE promo_codes ADD COLUMN discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER discount_type",
+            'applies_to_plan' => "ALTER TABLE promo_codes ADD COLUMN applies_to_plan VARCHAR(64) NOT NULL DEFAULT 'any' AFTER discount_value",
+            'applies_to_period' => "ALTER TABLE promo_codes ADD COLUMN applies_to_period ENUM('any','monthly','annual') NOT NULL DEFAULT 'any' AFTER applies_to_plan",
+            'max_redemptions' => "ALTER TABLE promo_codes ADD COLUMN max_redemptions INT UNSIGNED NULL AFTER applies_to_period",
+            'redeemed_count' => "ALTER TABLE promo_codes ADD COLUMN redeemed_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER max_redemptions",
+            'starts_at' => "ALTER TABLE promo_codes ADD COLUMN starts_at DATETIME NULL AFTER redeemed_count",
+            'expires_at' => "ALTER TABLE promo_codes ADD COLUMN expires_at DATETIME NULL AFTER starts_at",
+            'is_active' => "ALTER TABLE promo_codes ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER expires_at",
+            'created_at' => "ALTER TABLE promo_codes ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER is_active",
+            'updated_at' => "ALTER TABLE promo_codes ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at",
+        ];
+        foreach ($columns as $column => $sql) if (!db_column_exists('promo_codes', $column)) db()->query($sql);
+        try { db()->query("ALTER TABLE promo_codes MODIFY COLUMN applies_to_plan VARCHAR(64) NOT NULL DEFAULT 'any'"); } catch (Throwable $e) {}
+        if (!db_index_exists('promo_codes', 'uniq_promo_codes_code')) db()->query('ALTER TABLE promo_codes ADD UNIQUE KEY uniq_promo_codes_code (code)');
+        db()->query("CREATE TABLE IF NOT EXISTS promo_code_redemptions (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          promo_code_id INT UNSIGNED NOT NULL,
+          user_id INT UNSIGNED NOT NULL,
+          stripe_session_id VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id), UNIQUE KEY uniq_promo_redemptions_session (stripe_session_id), KEY idx_promo_redemptions_promo_code_id (promo_code_id), KEY idx_promo_redemptions_user_id (user_id),
+          CONSTRAINT fk_promo_redemptions_code FOREIGN KEY (promo_code_id) REFERENCES promo_codes (id) ON DELETE CASCADE,
+          CONSTRAINT fk_promo_redemptions_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (Throwable $e) {}
+}
+
+function admin_config_file(): string { return dirname(__DIR__) . '/config/app.php'; }
+function admin_plan_price_defaults(): array { return array_map(fn($p) => (float)($p['price_gbp'] ?? 0), rook_default_plan_definitions()); }
+function admin_plan_price(string $plan): float { return rook_plan_price_gbp($plan, 0); }
+function admin_plan_definitions(): array { return rook_plan_definitions(); }
+function admin_annual_discount_months(): int { return defined('ANNUAL_DISCOUNT_MONTHS') ? max(0, min(11, (int) ANNUAL_DISCOUNT_MONTHS)) : 2; }
+function normalise_promo_code_admin(string $rawCode): string { return strtoupper(preg_replace('/[^A-Z0-9_-]/i', '', trim($rawCode)) ?? ''); }
+function admin_current_config_values(array $overrides = []): array {
+    return array_merge([
+        'db_host' => DB_HOST, 'db_name' => DB_NAME, 'db_user' => DB_USER, 'db_pass' => DB_PASS,
+        'ai_provider' => defined('AI_PROVIDER') ? AI_PROVIDER : 'ollama', 'ai_base_url' => defined('AI_BASE_URL') ? AI_BASE_URL : '', 'ai_model' => defined('AI_MODEL') ? AI_MODEL : '', 'ai_api_key' => defined('AI_API_KEY') ? AI_API_KEY : '',
+        'stripe_secret_key' => defined('STRIPE_SECRET_KEY') ? STRIPE_SECRET_KEY : '',
+        'team_chat_encryption_key' => defined('TEAM_CHAT_ENCRYPTION_KEY') ? TEAM_CHAT_ENCRYPTION_KEY : bin2hex(random_bytes(32)),
+        'teams_require_2fa' => defined('TEAMS_REQUIRE_2FA') && TEAMS_REQUIRE_2FA ? 1 : 0,
+        'app_name' => APP_NAME, 'app_tagline' => defined('APP_TAGLINE') ? APP_TAGLINE : 'Professional AI assistant',
+        'plan_definitions' => admin_plan_definitions(),
+        'plan_plus_price_gbp' => admin_plan_price('plus'), 'plan_pro_price_gbp' => admin_plan_price('pro'), 'plan_business_price_gbp' => admin_plan_price('business'),
+        'annual_discount_months' => admin_annual_discount_months(),
+    ], $overrides);
+}
+function admin_config_contents(array $values): string {
+    $export = fn($v) => var_export((string)$v, true);
+    $exportBool = fn($v) => ((int)$v === 1 ? 'true' : 'false');
+    $price = fn($v) => number_format(max(0, (float)$v), 2, '.', '');
+    return "<?php\n" .
+        "// Generated by RookGPT admin on " . date('c') . ".\n" .
+        "defined('DB_HOST') || define('DB_HOST', " . $export($values['db_host'] ?? DB_HOST) . ");\n" .
+        "defined('DB_NAME') || define('DB_NAME', " . $export($values['db_name'] ?? DB_NAME) . ");\n" .
+        "defined('DB_USER') || define('DB_USER', " . $export($values['db_user'] ?? DB_USER) . ");\n" .
+        "defined('DB_PASS') || define('DB_PASS', " . $export($values['db_pass'] ?? DB_PASS) . ");\n" .
+        "defined('AI_PROVIDER') || define('AI_PROVIDER', " . $export($values['ai_provider'] ?? (defined('AI_PROVIDER') ? AI_PROVIDER : 'ollama')) . ");\n" .
+        "defined('AI_BASE_URL') || define('AI_BASE_URL', " . $export($values['ai_base_url'] ?? (defined('AI_BASE_URL') ? AI_BASE_URL : '')) . ");\n" .
+        "defined('AI_MODEL') || define('AI_MODEL', " . $export($values['ai_model'] ?? (defined('AI_MODEL') ? AI_MODEL : '')) . ");\n" .
+        "defined('AI_API_KEY') || define('AI_API_KEY', " . $export($values['ai_api_key'] ?? (defined('AI_API_KEY') ? AI_API_KEY : '')) . ");\n" .
+        "defined('OLLAMA_URL') || define('OLLAMA_URL', AI_BASE_URL);\n" .
+        "defined('OLLAMA_MODEL') || define('OLLAMA_MODEL', AI_MODEL);\n" .
+        "defined('STRIPE_SECRET_KEY') || define('STRIPE_SECRET_KEY', " . $export($values['stripe_secret_key'] ?? (defined('STRIPE_SECRET_KEY') ? STRIPE_SECRET_KEY : '')) . ");\n" .
+        "defined('TEAM_CHAT_ENCRYPTION_KEY') || define('TEAM_CHAT_ENCRYPTION_KEY', " . $export($values['team_chat_encryption_key'] ?? (defined('TEAM_CHAT_ENCRYPTION_KEY') ? TEAM_CHAT_ENCRYPTION_KEY : bin2hex(random_bytes(32)))) . ");\n" .
+        "defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', " . $exportBool($values['teams_require_2fa'] ?? 1) . ");\n" .
+        "defined('APP_NAME') || define('APP_NAME', " . $export($values['app_name'] ?? APP_NAME) . ");\n" .
+        "defined('APP_TAGLINE') || define('APP_TAGLINE', " . $export($values['app_tagline'] ?? (defined('APP_TAGLINE') ? APP_TAGLINE : 'Professional AI assistant')) . ");\n" .
+        "defined('PLAN_PLUS_PRICE_GBP') || define('PLAN_PLUS_PRICE_GBP', " . $price($values['plan_plus_price_gbp'] ?? admin_plan_price('plus')) . ");\n" .
+        "defined('PLAN_PRO_PRICE_GBP') || define('PLAN_PRO_PRICE_GBP', " . $price($values['plan_pro_price_gbp'] ?? admin_plan_price('pro')) . ");\n" .
+        "defined('PLAN_BUSINESS_PRICE_GBP') || define('PLAN_BUSINESS_PRICE_GBP', " . $price($values['plan_business_price_gbp'] ?? admin_plan_price('business')) . ");\n" .
+        "defined('ANNUAL_DISCOUNT_MONTHS') || define('ANNUAL_DISCOUNT_MONTHS', " . (int)($values['annual_discount_months'] ?? admin_annual_discount_months()) . ");\n" .
+        "defined('ROOK_PLAN_DEFINITIONS') || define('ROOK_PLAN_DEFINITIONS', " . var_export($values['plan_definitions'] ?? admin_plan_definitions(), true) . ");\n";
+}
 function admin_header(string $title, array $user, string $active = ''): void {
     $tabs = [
         ['./', 'dashboard', 'fa-chart-line', 'Dashboard'],
         ['notifications', 'notifications', 'fa-bell', 'Notifications'],
         ['users', 'users', 'fa-users-gear', 'Users & plans'],
+        ['prices', 'prices', 'fa-sterling-sign', 'Prices'],
+        ['promo', 'promo', 'fa-ticket', 'Promo codes'],
         ['api-keys', 'api-keys', 'fa-key', 'API keys'],
         ['activity', 'activity', 'fa-clock-rotate-left', 'Activity'],
         ['settings', 'settings', 'fa-gear', 'Settings'],

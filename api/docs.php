@@ -140,7 +140,7 @@ Content-Type: application/json</pre>
             <tr><td>401</td><td><code>Invalid API key</code></td><td>The key is wrong, disabled, revoked, or deleted.</td></tr>
             <tr><td>403</td><td><code>API access is not available on this plan</code></td><td>The account plan does not include API access.</td></tr>
             <tr><td>405</td><td><code>POST only</code></td><td>The endpoint only accepts POST requests.</td></tr>
-            <tr><td>429</td><td><code>Daily API call limit reached for Pro plan</code></td><td>The Pro daily request limit has been reached.</td></tr>
+            <tr><td>429</td><td><code>Daily API call limit reached for this plan</code></td><td>The current plan daily request limit has been reached.</td></tr>
             <tr><td>502</td><td><code>AI provider request failed</code></td><td>The local AI provider request failed or returned an invalid response.</td></tr>
           </tbody>
         </table>

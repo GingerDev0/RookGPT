@@ -10,8 +10,8 @@ if (is_post()) {
         $adminUserId = (int)$user['id'];
         $targetId = (int)($_POST['user_id'] ?? 0);
         if (isset($_POST['update_user'])) {
-            $plan = (string)($_POST['plan'] ?? 'free');
-            if (!in_array($plan, ['free','plus','pro','business'], true)) $plan = 'free';
+            $plan = rook_plan_slug((string)($_POST['plan'] ?? 'free'));
+            if (!array_key_exists($plan, rook_plan_definitions())) $plan = 'free';
             $period = trim((string)($_POST['plan_billing_period'] ?? ''));
             $periodValue = in_array($period, ['monthly','annual','team','manual'], true) ? $period : null;
             $expiresRaw = trim((string)($_POST['plan_expires_at'] ?? ''));
@@ -130,10 +130,9 @@ admin_header('Users & plans', $user, 'users');
               <h3><i class="fa-solid fa-credit-card me-2"></i>Subscription</h3>
               <label class="form-label mb-0">Plan</label>
               <select class="form-select" name="plan">
-                <option value="free" <?= $row['plan']==='free'?'selected':'' ?>>Free</option>
-                <option value="plus" <?= $row['plan']==='plus'?'selected':'' ?>>Plus</option>
-                <option value="pro" <?= $row['plan']==='pro'?'selected':'' ?>>Pro</option>
-                <option value="business" <?= $row['plan']==='business'?'selected':'' ?>>Business</option>
+                <?php foreach (rook_plan_definitions() as $planSlug => $planDef): ?>
+                  <option value="<?= e($planSlug) ?>" <?= $row['plan']===$planSlug?'selected':'' ?>><?= e((string)$planDef['label']) ?><?= empty($planDef['enabled']) ? ' (disabled)' : '' ?></option>
+                <?php endforeach; ?>
               </select>
               <label class="form-label mb-0">Billing period</label>
               <select class="form-select" name="plan_billing_period">

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/lib/install_guard.php';
+require_once __DIR__ . '/lib/plans.php';
 
 defined('APP_TIMEZONE') || define('APP_TIMEZONE', 'Europe/London');
 date_default_timezone_set(APP_TIMEZONE);
@@ -83,17 +84,7 @@ function json_response(array $data, int $status = 200): never
     exit;
 }
 
-function plan_limits(string $plan): array
-{
-    $map = [
-        'free' => ['api_access' => false, 'api_call_limit' => 0],
-        'plus' => ['api_access' => false, 'api_call_limit' => 0],
-        'pro' => ['api_access' => true, 'api_call_limit' => 1000],
-        'business' => ['api_access' => true, 'api_call_limit' => 0],
-    ];
-
-    return $map[$plan] ?? $map['free'];
-}
+function plan_limits(string $plan): array { return rook_plan_limits($plan); }
 
 function api_float_option(array $data, string $key, float $default, float $min, float $max): float
 {
@@ -195,7 +186,7 @@ if ((int) ($limits['api_call_limit'] ?? 0) > 0) {
     );
     $used = (int) ($usage['total'] ?? 0);
     if ($used >= (int) $limits['api_call_limit']) {
-        json_response(['ok' => false, 'error' => 'Daily API call limit reached for Pro plan'], 429);
+        json_response(['ok' => false, 'error' => 'Daily API call limit reached for this plan'], 429);
     }
 }
 

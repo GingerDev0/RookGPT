@@ -4,6 +4,7 @@ declare(strict_types=1);
 session_start();
 require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/security.php';
+require_once __DIR__ . '/../lib/plans.php';
 csrf_bootstrap_web();
 date_default_timezone_set('Europe/London');
 
@@ -57,7 +58,7 @@ function current_user(): ?array
     if ($sessionToken === '' || $currentToken === '' || !hash_equals($currentToken, $sessionToken)) { clear_local_session('You were signed out because this account was used on another device.'); return null; }
     return $row;
 }
-function plan_limits(string $plan): array { $map = ['free'=>['label'=>'Free','api_access'=>false,'api_call_limit'=>0], 'plus'=>['label'=>'Plus','api_access'=>false,'api_call_limit'=>0], 'pro'=>['label'=>'Pro','api_access'=>true,'api_call_limit'=>1000], 'business'=>['label'=>'Business','api_access'=>true,'api_call_limit'=>0]]; return $map[$plan] ?? $map['free']; }
+function plan_limits(string $plan): array { return rook_plan_limits($plan); }
 function app_base_url(): string { $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'; $forwardedProto = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')); $scheme = ($https || $forwardedProto === 'https' || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443') ? 'https' : 'http'; $host = trim((string) ($_SERVER['HTTP_HOST'] ?? 'localhost')); return $scheme . '://' . $host; }
 function generate_api_key_plaintext(): string { return 'rgpt_' . bin2hex(random_bytes(24)); }
 function mask_api_key(?string $plain): string { $plain = trim((string)$plain); if ($plain === '') return 'Unavailable'; $tail = strlen($plain) >= 4 ? substr($plain, -4) : $plain; $prefix = str_starts_with($plain, 'rgpt_team_') ? 'rgpt_team_' : (str_starts_with($plain, 'rk_live_') ? 'rk_live_' : (str_starts_with($plain, 'rgpt_') ? 'rgpt_' : substr($plain, 0, min(8, strlen($plain))))); return $prefix . '****' . $tail; }
@@ -111,7 +112,7 @@ function fetch_daily_usage(int $userId, int $days = 7): array { $rows = db_fetch
 function fetch_usage_totals(int $userId): array { $row = db_fetch_one('SELECT COUNT(*) AS requests, COALESCE(SUM(prompt_eval_count + eval_count), 0) AS tokens, COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) AS failures FROM api_logs WHERE user_id = ?', 'i', [$userId]) ?? []; return ['requests'=>(int)($row['requests'] ?? 0), 'tokens'=>(int)($row['tokens'] ?? 0), 'failures'=>(int)($row['failures'] ?? 0)]; }
 function fetch_today_api_call_count(int $userId): int { $row = db_fetch_one('SELECT COUNT(*) AS total FROM api_logs WHERE user_id = ? AND DATE(created_at) = CURDATE()', 'i', [$userId]); return (int)($row['total'] ?? 0); }
 function is_admin_user(int $userId): bool { try { $row = db_fetch_one('SELECT id FROM admins WHERE user_id = ? AND is_active = 1 LIMIT 1', 'i', [$userId]); return (bool)$row; } catch (Throwable $e) { return false; } }
-function require_api_user(): array { $user = current_user(); if (!$user) redirect_to('/'); $planInfo = plan_limits((string)($user['plan'] ?? 'free')); if (empty($planInfo['api_access'])) { $_SESSION['flash'] = 'API access is only available on Pro and Business plans.'; redirect_to('/'); } return [$user, $planInfo]; }
+function require_api_user(): array { $user = current_user(); if (!$user) redirect_to('/'); $planInfo = plan_limits((string)($user['plan'] ?? 'free')); if (empty($planInfo['api_access'])) { $_SESSION['flash'] = 'API access is not available on your current plan.'; redirect_to('/'); } return [$user, $planInfo]; }
 function api_stats(array $user): array { $keys = fetch_api_keys((int)$user['id']); $usageDaily = fetch_daily_usage((int)$user['id']); $usageTotals = fetch_usage_totals((int)$user['id']); $todayApiCalls = fetch_today_api_call_count((int)$user['id']); $activeKeyCount = 0; foreach ($keys as $key) if (empty($key['revoked_at'])) $activeKeyCount++; $chartKeyLabels = []; $chartKeyValues = []; foreach (array_slice($keys, 0, 6) as $key) { $chartKeyLabels[] = (string)$key['name']; $chartKeyValues[] = (int)$key['request_count']; } return compact('keys','usageDaily','usageTotals','todayApiCalls','activeKeyCount','chartKeyLabels','chartKeyValues'); }
 
 function api_header(string $title, array $user, array $planInfo, string $active = 'overview', bool $charts = false): void { $tabs = [['/api/','overview','fa-chart-line','Overview'],['/api/keys','keys','fa-key','Keys'],['/api/playground','playground','fa-flask','Playground'],['/api/docs','docs','fa-book-open','Docs'],['/api/usage','usage','fa-chart-simple','Usage']]; ?>

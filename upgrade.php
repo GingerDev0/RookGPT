@@ -5,6 +5,7 @@ date_default_timezone_set('Europe/London');
 session_start();
 require_once __DIR__ . '/lib/install_guard.php';
 require_once __DIR__ . '/lib/security.php';
+require_once __DIR__ . '/lib/plans.php';
 csrf_bootstrap_web();
 
 defined('ANNUAL_DISCOUNT_MONTHS') || define('ANNUAL_DISCOUNT_MONTHS', 2); // Annual plans are charged as 10 months for 12 months of access.
@@ -68,7 +69,8 @@ function db_index_exists(string $table, string $index): bool
 
 function ensure_upgrade_schema(): void
 {
-    if (!db_column_exists('users', 'plan_expires_at')) {
+    try { db()->query("ALTER TABLE users MODIFY COLUMN plan VARCHAR(64) NOT NULL DEFAULT 'free'"); } catch (Throwable $e) {}
+        if (!db_column_exists('users', 'plan_expires_at')) {
         db()->query("ALTER TABLE users ADD COLUMN plan_expires_at DATETIME NULL AFTER plan");
     }
     if (!db_column_exists('users', 'plan_billing_period')) {
@@ -87,7 +89,7 @@ function ensure_upgrade_schema(): void
 "
       . "discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 "
-      . "applies_to_plan ENUM('any','plus','pro','business') NOT NULL DEFAULT 'any',
+      . "applies_to_plan VARCHAR(64) NOT NULL DEFAULT 'any',
 "
       . "applies_to_period ENUM('any','monthly','annual') NOT NULL DEFAULT 'any',
 "
@@ -117,7 +119,7 @@ function ensure_upgrade_schema(): void
         'description' => "ALTER TABLE promo_codes ADD COLUMN description VARCHAR(255) NULL AFTER code",
         'discount_type' => "ALTER TABLE promo_codes ADD COLUMN discount_type ENUM('percent','fixed') NOT NULL DEFAULT 'percent' AFTER description",
         'discount_value' => "ALTER TABLE promo_codes ADD COLUMN discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER discount_type",
-        'applies_to_plan' => "ALTER TABLE promo_codes ADD COLUMN applies_to_plan ENUM('any','plus','pro','business') NOT NULL DEFAULT 'any' AFTER discount_value",
+        'applies_to_plan' => "ALTER TABLE promo_codes ADD COLUMN applies_to_plan VARCHAR(64) NOT NULL DEFAULT 'any' AFTER discount_value",
         'applies_to_period' => "ALTER TABLE promo_codes ADD COLUMN applies_to_period ENUM('any','monthly','annual') NOT NULL DEFAULT 'any' AFTER applies_to_plan",
         'max_redemptions' => "ALTER TABLE promo_codes ADD COLUMN max_redemptions INT UNSIGNED NULL AFTER applies_to_period",
         'redeemed_count' => "ALTER TABLE promo_codes ADD COLUMN redeemed_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER max_redemptions",
@@ -169,6 +171,7 @@ function db_column_exists_auth(string $table, string $column): bool
 function ensure_auth_security_schema(): void
 {
     try {
+        try { db()->query("ALTER TABLE users MODIFY COLUMN plan VARCHAR(64) NOT NULL DEFAULT 'free'"); } catch (Throwable $e) {}
         if (!db_column_exists_auth('users', 'current_session_token')) db()->query("ALTER TABLE users ADD COLUMN current_session_token VARCHAR(128) NULL AFTER custom_prompt");
         if (!db_column_exists_auth('users', 'session_rotated_at')) db()->query("ALTER TABLE users ADD COLUMN session_rotated_at DATETIME NULL AFTER current_session_token");
         if (!db_column_exists_auth('users', 'two_factor_secret')) db()->query("ALTER TABLE users ADD COLUMN two_factor_secret VARCHAR(64) NULL AFTER session_rotated_at");
@@ -284,22 +287,24 @@ function normalise_period(string $period): string
     return array_key_exists($period, billing_periods()) ? $period : 'monthly';
 }
 
-function plan_base_amount(array $plan, string $period): int
+function upgrade_plan_price(string $plan, float $fallback): float { return rook_plan_price_gbp($plan, $fallback); }
+
+function plan_base_amount(array $plan, string $period): float
 {
     $periods = billing_periods();
     $multiplier = (int) ($periods[$period]['multiplier'] ?? 1);
-    return ((int) $plan['price']) * $multiplier;
+    return ((float) $plan['price_gbp']) * $multiplier;
 }
 
-function annual_discount_amount(array $plan, string $period): int
+function annual_discount_amount(array $plan, string $period): float
 {
     if ($period !== 'annual') return 0;
     $periods = billing_periods();
     $discountMonths = (int) ($periods[$period]['discount_months'] ?? 0);
-    return max(0, ((int) $plan['price']) * $discountMonths);
+    return max(0.0, ((float) $plan['price_gbp']) * $discountMonths);
 }
 
-function plan_amount(array $plan, string $period): int
+function plan_amount(array $plan, string $period): float
 {
     return max(0, plan_base_amount($plan, $period) - annual_discount_amount($plan, $period));
 }
@@ -330,7 +335,7 @@ function plan_credit_info(array $user, array $plans): array
 
     $billingPeriod = normalise_period(strtolower((string) ($user['plan_billing_period'] ?? 'monthly')));
     $periodSeconds = $billingPeriod === 'annual' ? (365.25 * 86400) : (30.4375 * 86400);
-    $currentPlanPricePence = plan_amount($plans[$currentPlan], $billingPeriod) * 100;
+    $currentPlanPricePence = (int) round(plan_amount($plans[$currentPlan], $billingPeriod) * 100);
     $creditPence = (int) floor($currentPlanPricePence * min(1, $remainingSeconds / $periodSeconds));
     $daysLeft = (int) ceil($remainingSeconds / 86400);
 
@@ -414,7 +419,7 @@ function create_checkout_session(array $user, string $selectedPlan, string $peri
     $baseUrl = app_base_url();
     // Annual discount is already baked into this Stripe line item amount.
     // Current-plan credit and local promo codes are then applied inside Stripe as a one-off coupon.
-    $subtotalPence = plan_amount($plan, $period) * 100;
+    $subtotalPence = (int) round(plan_amount($plan, $period) * 100);
     $planCreditPence = max(0, min($subtotalPence, (int) ($planCredit['credit_pence'] ?? 0)));
     $promoBasePence = max(0, $subtotalPence - $planCreditPence);
     $promoDiscountPence = (int) ($promo['discount_pence'] ?? 0);
@@ -511,30 +516,7 @@ function verify_checkout_session_and_upgrade(array $user, array $plans): string
     return (string) $plans[$planSlug]['label'];
 }
 
-$plans = [
-    'plus' => [
-        'label' => 'Plus',
-        'tagline' => 'Reasoning unlocked',
-        'price' => 9,
-        'description' => 'Smarter day-to-day chat, reasoning, and personality controls without going full API goblin.',
-        'features' => ['Higher chat limits', 'Reasoning controls', 'Custom Rook personality', 'Conversation rename and sharing'],
-    ],
-    'pro' => [
-        'label' => 'Pro',
-        'tagline' => 'API + serious limits',
-        'price' => 19,
-        'description' => 'Best for power users who want higher limits, API access, and room to do real work without hitting ceilings.',
-        'features' => ['Everything in Plus', 'API keys dashboard', 'Request analytics', 'Higher usage limits'],
-        'recommended' => true,
-    ],
-    'business' => [
-        'label' => 'Business',
-        'tagline' => 'Teams + heavy usage',
-        'price' => 49,
-        'description' => 'Shared team access, broad limits, API access, and less chance of running into annoying caps.',
-        'features' => ['Everything in Pro', 'Team workspace', 'Shared team conversations', 'Team API key management'],
-    ],
-];
+$plans = rook_enabled_paid_plans();
 
 ensure_upgrade_schema();
 
@@ -546,12 +528,11 @@ if (!$user) {
 }
 
 $selectedPlan = strtolower((string) ($_GET['plan'] ?? $_POST['plan'] ?? 'pro'));
-if (!isset($plans[$selectedPlan])) $selectedPlan = 'pro';
+if (!isset($plans[$selectedPlan])) { $keys = array_keys($plans); $selectedPlan = $keys[0] ?? 'free'; }
 $period = normalise_period(strtolower((string) ($_GET['period'] ?? $_POST['period'] ?? 'monthly')));
 $plan = $plans[$selectedPlan];
 $currentPlan = (string) ($user['plan'] ?? 'free');
-$planRank = ['free' => 0, 'plus' => 1, 'pro' => 2, 'business' => 3];
-$isCurrentOrLower = ($planRank[$selectedPlan] ?? 0) <= ($planRank[$currentPlan] ?? 0);
+$isCurrentOrLower = rook_plan_rank($selectedPlan) <= rook_plan_rank($currentPlan);
 $stripeNotice = '';
 $stripeError = '';
 $promoInput = normalise_promo_code((string) ($_GET['promo'] ?? $_POST['promo_code'] ?? ''));
@@ -559,8 +540,9 @@ $baseSubtotal = plan_base_amount($plan, $period);
 $annualDiscount = annual_discount_amount($plan, $period);
 $subtotal = plan_amount($plan, $period);
 $planCredit = plan_credit_info($user, $plans);
-$planCreditPence = max(0, min($subtotal * 100, (int) ($planCredit['credit_pence'] ?? 0)));
-$promoBasePence = max(0, ($subtotal * 100) - $planCreditPence);
+$subtotalPence = (int) round($subtotal * 100);
+$planCreditPence = max(0, min($subtotalPence, (int) ($planCredit['credit_pence'] ?? 0)));
+$promoBasePence = max(0, $subtotalPence - $planCreditPence);
 $promo = null;
 
 if ($promoInput !== '') {

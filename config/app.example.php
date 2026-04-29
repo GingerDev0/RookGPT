@@ -16,3 +16,9 @@ defined('TEAM_CHAT_ENCRYPTION_KEY') || define('TEAM_CHAT_ENCRYPTION_KEY', 'chang
 defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', true);
 defined('APP_NAME') || define('APP_NAME', 'RookGPT');
 defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');
+defined('PLAN_PLUS_PRICE_GBP') || define('PLAN_PLUS_PRICE_GBP', 9.00);
+defined('PLAN_PRO_PRICE_GBP') || define('PLAN_PRO_PRICE_GBP', 19.00);
+defined('PLAN_BUSINESS_PRICE_GBP') || define('PLAN_BUSINESS_PRICE_GBP', 49.00);
+defined('ANNUAL_DISCOUNT_MONTHS') || define('ANNUAL_DISCOUNT_MONTHS', 2);
+// Admin > Plans & pricing writes the complete plan configuration here. Leave empty to use defaults.
+defined('ROOK_PLAN_DEFINITIONS') || define('ROOK_PLAN_DEFINITIONS', []);

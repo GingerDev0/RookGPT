@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` VARCHAR(50) NOT NULL,
   `email` VARCHAR(190) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
-  `plan` ENUM('free','plus','pro','business') NOT NULL DEFAULT 'free',
+  `plan` VARCHAR(64) NOT NULL DEFAULT 'free',
   `plan_expires_at` DATETIME NULL,
   `plan_billing_period` ENUM('monthly','annual','team','manual') NULL,
   `thinking_enabled` TINYINT(1) NOT NULL DEFAULT 0,
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS `promo_codes` (
   `description` VARCHAR(255) NULL,
   `discount_type` ENUM('percent','fixed') NOT NULL DEFAULT 'percent',
   `discount_value` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-  `applies_to_plan` ENUM('any','plus','pro','business') NOT NULL DEFAULT 'any',
+  `applies_to_plan` VARCHAR(64) NOT NULL DEFAULT 'any',
   `applies_to_period` ENUM('any','monthly','annual') NOT NULL DEFAULT 'any',
   `max_redemptions` INT UNSIGNED NULL,
   `redeemed_count` INT UNSIGNED NOT NULL DEFAULT 0,
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS `team_members` (
   `can_create_conversations` TINYINT(1) NOT NULL DEFAULT 0,
   `can_view_api_keys` TINYINT(1) NOT NULL DEFAULT 0,
   `can_manage_api_keys` TINYINT(1) NOT NULL DEFAULT 0,
-  `pre_team_plan` ENUM('free','plus','pro','business') NULL,
+  `pre_team_plan` VARCHAR(64) NULL,
   `pre_team_thinking_enabled` TINYINT(1) NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -274,6 +274,21 @@ CREATE TABLE IF NOT EXISTS `team_chat_delete_events` (
   CONSTRAINT `fk_team_chat_delete_events_actor`
     FOREIGN KEY (`actor_user_id`) REFERENCES `users` (`id`)
     ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `team_chat_typing` (
+  `team_id` INT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `is_typing` TINYINT(1) NOT NULL DEFAULT 0,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`team_id`, `user_id`),
+  KEY `idx_team_chat_typing_team_updated` (`team_id`, `updated_at`),
+  CONSTRAINT `fk_team_chat_typing_team`
+    FOREIGN KEY (`team_id`) REFERENCES `teams` (`id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_team_chat_typing_user`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+    ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `team_changes` (

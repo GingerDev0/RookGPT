@@ -108,6 +108,13 @@ if ($activeTeam) {
   .team-chat-index .team-chat-status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.82rem; }
   .team-chat-index .team-chat-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #38d39f; box-shadow: 0 0 0 4px rgba(56,211,159,.12); }
   .team-chat-index .team-chat-status.is-offline .team-chat-status-dot { background: #ffb86b; box-shadow: 0 0 0 4px rgba(255,184,107,.12); }
+  .team-chat-index .team-typing-indicator { display: none; align-items: center; gap: 7px; color: #c9d8ff; font-size: 0.78rem; font-weight: 800; }
+  .team-chat-index .team-typing-indicator.is-visible { display: inline-flex; }
+  .team-chat-index .team-typing-dots { display: inline-flex; gap: 3px; align-items: center; }
+  .team-chat-index .team-typing-dots span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .55; animation: teamTypingPulse 1.2s infinite ease-in-out; }
+  .team-chat-index .team-typing-dots span:nth-child(2) { animation-delay: .16s; }
+  .team-chat-index .team-typing-dots span:nth-child(3) { animation-delay: .32s; }
+   teamTypingPulse { 0%, 80%, 100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-3px); opacity: 1; } }
   .team-chat-index .mention-picker { position: absolute !important; left: 0 !important; right: 0 !important; bottom: calc(100% + 8px) !important; top: auto !important; z-index: 99999 !important; display: none; width: auto !important; min-width: 220px; max-height: 260px; overflow: auto; border: 1px solid rgba(124, 156, 255, 0.24); background: linear-gradient(180deg, rgba(16, 24, 43, 0.98), rgba(10, 16, 28, 0.98)); box-shadow: 0 22px 60px rgba(0,0,0,0.50); backdrop-filter: blur(18px); padding: 6px; }
   .team-chat-index .mention-picker.is-open { display: grid !important; gap: 4px; }
   .team-chat-index .mention-option { width: 100%; border: 0; background: transparent; color: var(--text); padding: 9px 10px; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 0.86rem; }
@@ -204,6 +211,7 @@ if ($activeTeam) {
           </div>
           <div class="composer-footer">
             <div class="team-chat-status" id="teamChatStatus"><span class="team-chat-status-dot"></span><span>Live</span></div>
+            <div class="team-typing-indicator" id="teamTypingIndicator" aria-live="polite"><span class="team-typing-text">Someone is typing</span><span class="team-typing-dots" aria-hidden="true"><span></span><span></span><span></span></span></div>
             <div><?= $canSendChat ? 'Press Enter to send · Shift + Enter for a new line' : 'Your role can read team chat but cannot send messages.' ?></div>
           </div>
         </form>
@@ -296,6 +304,8 @@ const bootTeamChat = () => {
     }
   });
   const status = document.getElementById('teamChatStatus');
+  const typingIndicator = document.getElementById('teamTypingIndicator');
+  const typingText = typingIndicator ? typingIndicator.querySelector('.team-typing-text') : null;
   const mentionPicker = document.getElementById('teamMentionPicker');
   const mentionDataNode = document.getElementById('teamMentionUsersJson');
   const mentionUsers = (() => {
@@ -320,6 +330,58 @@ const bootTeamChat = () => {
     const text = status.querySelector('span:last-child');
     if (text) text.textContent = label;
   };
+  const renderTypingUsers = (users) => {
+    if (!typingIndicator || !typingText) return;
+    const activeUsers = Array.isArray(users) ? users.filter((item) => item && Number(item.user_id || 0) !== currentUserId) : [];
+    if (!activeUsers.length) {
+      typingIndicator.classList.remove('is-visible');
+      typingText.textContent = 'Someone is typing';
+      return;
+    }
+    const names = activeUsers.map((item) => String(item.username || 'Someone')).slice(0, 3);
+    let label = 'Someone is typing';
+    if (names.length === 1) label = `${names[0]} is typing`;
+    if (names.length === 2) label = `${names[0]} and ${names[1]} are typing`;
+    if (names.length >= 3) label = `${names[0]}, ${names[1]} and ${names.length - 2} more are typing`;
+    typingText.textContent = label;
+    typingIndicator.classList.add('is-visible');
+  };
+  let typingActive = false;
+  let typingTimer = null;
+  let typingLastSent = 0;
+  const postTypingState = async (isTyping) => {
+    if (!token || !input || input.disabled) return;
+    const now = Date.now();
+    if (isTyping && typingActive && now - typingLastSent < 2500) return;
+    typingActive = Boolean(isTyping);
+    typingLastSent = now;
+    const body = new URLSearchParams();
+    body.set('t', token);
+    body.set('typing', isTyping ? '1' : '0');
+    try {
+      await fetch('/teams/chat-typing', {
+        method: 'POST',
+        body,
+        headers: { 'Accept': 'application/json', 'X-CSRF-Token': '<?= e(csrf_token()) ?>' }
+      });
+    } catch (_) {}
+  };
+  const queueTypingStop = () => {
+    if (typingTimer) window.clearTimeout(typingTimer);
+    typingTimer = window.setTimeout(() => postTypingState(false), 3200);
+  };
+  const markTyping = () => {
+    if (!input || input.disabled) return;
+    const hasText = input.value.trim().length > 0;
+    if (!hasText) {
+      if (typingTimer) window.clearTimeout(typingTimer);
+      postTypingState(false);
+      return;
+    }
+    postTypingState(true);
+    queueTypingStop();
+  };
+
   const enhanceCodeBlocks = (scope) => {
     if (!scope) return;
     scope.querySelectorAll('pre').forEach((pre) => {
@@ -534,6 +596,12 @@ const bootTeamChat = () => {
         if (payload.deleted_ids) removeMessages(payload.deleted_ids);
       } catch (_) {}
     });
+    source.addEventListener('typing', (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        renderTypingUsers(payload.users || []);
+      } catch (_) {}
+    });
     source.addEventListener('error', () => {
       setStatus(false, 'Reconnecting');
       if (source) source.close();
@@ -671,6 +739,7 @@ const bootTeamChat = () => {
       input.style.height = 'auto';
       input.style.height = `${Math.min(input.scrollHeight, 112)}px`;
       updateMentionPicker();
+      markTyping();
     });
     input.addEventListener('click', updateMentionPicker);
     input.addEventListener('focus', updateMentionPicker);
@@ -707,12 +776,15 @@ const bootTeamChat = () => {
         if (form) form.requestSubmit();
       }
     });
+    input.addEventListener('blur', () => postTypingState(false));
+    window.addEventListener('beforeunload', () => { if (typingActive) navigator.sendBeacon && navigator.sendBeacon('/teams/chat-typing', new URLSearchParams({ t: token, typing: '0' })); });
   }
   if (form && input) {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const message = input.value.trim();
       if (!message) return;
+      postTypingState(false);
       const button = form.querySelector('button[type="submit"]');
       if (button) button.disabled = true;
       try {

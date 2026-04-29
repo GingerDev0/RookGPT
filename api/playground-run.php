@@ -112,7 +112,7 @@ $limits = plan_limits((string)($key['plan'] ?? 'free'));
 if (empty($limits['api_access'])) playground_json(['ok' => false, 'error' => 'API access is not available on this plan'], 403);
 if ((int)($limits['api_call_limit'] ?? 0) > 0) {
     $usage = db_fetch_one('SELECT COUNT(*) AS total FROM api_logs WHERE user_id = ? AND DATE(created_at) = CURDATE()', 'i', [(int)$key['user_id']]);
-    if ((int)($usage['total'] ?? 0) >= (int)$limits['api_call_limit']) playground_json(['ok' => false, 'error' => 'Daily API call limit reached for Pro plan'], 429);
+    if ((int)($usage['total'] ?? 0) >= (int)$limits['api_call_limit']) playground_json(['ok' => false, 'error' => 'Daily API call limit reached for this plan'], 429);
 }
 
 $data = $input['body'] ?? null;

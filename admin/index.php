@@ -3,7 +3,7 @@ require __DIR__ . '/_bootstrap.php';
 $user = require_admin();
 $metrics = [
   'Users' => (int) (db_fetch_one('SELECT COUNT(*) AS total FROM users')['total'] ?? 0),
-  'Business users' => (int) (db_fetch_one('SELECT COUNT(*) AS total FROM users WHERE plan = "business"')['total'] ?? 0),
+  'Team-plan users' => (int) (db_fetch_one('SELECT COUNT(*) AS total FROM users WHERE plan <> "free" AND plan_billing_period = "team"')['total'] ?? 0),
   'Teams' => (int) (db_fetch_one('SELECT COUNT(*) AS total FROM teams')['total'] ?? 0),
   'Unread notifications' => (int) (db_fetch_one('SELECT COUNT(*) AS total FROM notifications WHERE read_at IS NULL')['total'] ?? 0),
 ];

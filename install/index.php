@@ -38,7 +38,12 @@ function php_config(array $s): string {
         "defined('TEAM_CHAT_ENCRYPTION_KEY') || define('TEAM_CHAT_ENCRYPTION_KEY', " . $export($s['team_chat_encryption_key'] ?? bin2hex(random_bytes(32))) . ");\n" .
         "defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', true);\n" .
         "defined('APP_NAME') || define('APP_NAME', 'RookGPT');\n" .
-        "defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');\n";
+        "defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');\n" .
+        "defined('PLAN_PLUS_PRICE_GBP') || define('PLAN_PLUS_PRICE_GBP', 9.00);\n" .
+        "defined('PLAN_PRO_PRICE_GBP') || define('PLAN_PRO_PRICE_GBP', 19.00);\n" .
+        "defined('PLAN_BUSINESS_PRICE_GBP') || define('PLAN_BUSINESS_PRICE_GBP', 49.00);\n" .
+        "defined('ANNUAL_DISCOUNT_MONTHS') || define('ANNUAL_DISCOUNT_MONTHS', 2);\n" .
+        "defined('ROOK_PLAN_DEFINITIONS') || define('ROOK_PLAN_DEFINITIONS', []);\n";
 }
 function split_sql(string $sql): array {
     $sql = preg_replace('/^\s*CREATE\s+DATABASE\b.*?;\s*/mi', '', $sql) ?? $sql;

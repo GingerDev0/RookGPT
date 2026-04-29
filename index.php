@@ -5,6 +5,7 @@ date_default_timezone_set('Europe/London');
 session_start();
 require_once __DIR__ . '/lib/install_guard.php';
 require_once __DIR__ . '/lib/security.php';
+require_once __DIR__ . '/lib/plans.php';
 require_once __DIR__ . '/lib/image_storage.php';
 csrf_bootstrap_web();
 
@@ -353,6 +354,7 @@ function ensure_account_plan_schema(): void
 {
     ensure_security_schema();
     try {
+        try { db()->query("ALTER TABLE users MODIFY COLUMN plan VARCHAR(64) NOT NULL DEFAULT 'free'"); } catch (Throwable $e) {}
         if (!db_column_exists('users', 'plan_expires_at')) {
             db()->query("ALTER TABLE users ADD COLUMN plan_expires_at DATETIME NULL AFTER plan");
         }
@@ -406,17 +408,8 @@ function current_user(): ?array
     return $row;
 }
 
-function plan_limits(string $plan): array
-{
-    $map = [
-        'free' => ['label' => 'Free', 'max_conversations' => 1, 'max_messages_daily' => 10, 'thinking_available' => false, 'api_access' => false, 'api_call_limit' => 0],
-        'plus' => ['label' => 'Plus', 'max_conversations' => 10, 'max_messages_per_conversation' => 200, 'thinking_available' => true, 'api_access' => false, 'api_call_limit' => 0],
-        'pro' => ['label' => 'Pro', 'max_conversations' => 50, 'max_messages_per_conversation' => 1000, 'thinking_available' => true, 'api_access' => true, 'api_call_limit' => 1000],
-        'business' => ['label' => 'Business', 'max_conversations' => 250, 'max_messages_per_conversation' => 5000, 'thinking_available' => true, 'api_access' => true, 'api_call_limit' => 0],
-    ];
-
-    return $map[$plan] ?? $map['free'];
-}
+function plan_price_gbp(string $plan, float $fallback): float { return rook_plan_price_gbp($plan, $fallback); }
+function plan_limits(string $plan): array { return rook_plan_limits($plan); }
 
 function generate_api_key_plaintext(): string
 {
@@ -741,11 +734,12 @@ function accept_team_invite(int $inviteId, int $userId): string
         'iisisi',
         [(int) $invite['team_id'], $userId, (string) $invite['role'], (int) $invite['can_create_conversations'], (string) ($currentUser['plan'] ?? 'free'), (int) ($currentUser['thinking_enabled'] ?? 0)]
     );
-    db_execute('UPDATE users SET plan = "business", plan_billing_period = "team", thinking_enabled = 1 WHERE id = ?', 'i', [$userId]);
+    $teamPlan = rook_first_enabled_plan_with('team_access', 'business');
+    db_execute('UPDATE users SET plan = ?, plan_billing_period = "team", thinking_enabled = 1 WHERE id = ?', 'si', [$teamPlan, $userId]);
     db_execute('UPDATE team_invites SET status = "accepted", responded_at = NOW() WHERE id = ?', 'i', [$inviteId]);
     db_execute('UPDATE notifications SET read_at = COALESCE(read_at, NOW()) WHERE related_team_invite_id = ? AND user_id = ?', 'ii', [$inviteId, $userId]);
     create_notification((int) $invite['invited_by_user_id'], 'Team invite accepted', (string) ($currentUser['username'] ?? 'A user') . ' accepted your invite to ' . (string) $invite['team_name'] . '.', 'system', $userId);
-    return 'You joined ' . (string) $invite['team_name'] . ' and your account is now Business while you are on the team.';
+    return 'You joined ' . (string) $invite['team_name'] . ' and your account now has team access while you are on the team.';
 }
 
 function decline_team_invite(int $inviteId, int $userId): string
@@ -1203,7 +1197,7 @@ function create_conversation(int $userId, string $title = 'New chat', ?int $team
     $user = current_user();
     $limits = plan_limits((string) ($user['plan'] ?? 'free'));
 
-    if (count_user_conversations($userId) >= $limits['max_conversations']) {
+    if ((int)($limits['max_conversations'] ?? 0) > 0 && count_user_conversations($userId) >= (int)$limits['max_conversations']) {
         throw new RuntimeException('You have reached your conversation limit for the ' . $limits['label'] . ' plan.');
     }
 
@@ -1277,11 +1271,11 @@ function add_message(int $conversationId, string $role, string $content, array $
         $limits = plan_limits($plan);
 
         if ($role === 'user') {
-            if (isset($limits['max_messages_daily']) && count_user_messages_today($userId) >= (int) $limits['max_messages_daily']) {
+            if (!empty($limits['max_messages_daily']) && count_user_messages_today($userId) >= (int) $limits['max_messages_daily']) {
                 throw new RuntimeException('You have reached today\'s ' . (int) $limits['max_messages_daily'] . ' message limit on the ' . $limits['label'] . ' plan. Try again tomorrow.');
             }
 
-            if (isset($limits['max_messages_per_conversation']) && count_conversation_messages($conversationId) >= (int) $limits['max_messages_per_conversation']) {
+            if (!empty($limits['max_messages_per_conversation']) && count_conversation_messages($conversationId) >= (int) $limits['max_messages_per_conversation']) {
                 throw new RuntimeException('You have reached the message limit for this chat on the ' . $limits['label'] . ' plan.');
             }
         }
@@ -1922,8 +1916,8 @@ if ($user && is_post()) {
         }
 
         if (isset($_POST['create_team'])) {
-            if ((string) ($user['plan'] ?? 'free') !== 'business') {
-                $_SESSION['flash'] = 'Teams are only available on the Business plan.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_sharing')) {
+                $_SESSION['flash'] = 'Teams are not available on your current plan.';
             } elseif (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
                 $_SESSION['flash'] = 'Enable 2FA in Account settings before creating a team.';
             } else {
@@ -2116,8 +2110,8 @@ if ($user && is_post()) {
 
         if (isset($_POST['save_custom_prompt'])) {
             $planInfo = plan_limits((string) ($user['plan'] ?? 'free'));
-            if (!in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)) {
-                $_SESSION['flash'] = 'AI personality controls are only available on Plus, Pro, and Business plans.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'custom_personality')) {
+                $_SESSION['flash'] = 'AI personality controls are not available on your current plan.';
             } else {
                 $customPrompt = normalize_custom_prompt((string) ($_POST['custom_prompt'] ?? ''));
                 if (custom_prompt_attempts_rename($customPrompt)) {
@@ -2136,8 +2130,8 @@ if ($user && is_post()) {
             $conversationId = (int) ($_POST['conversation_id'] ?? 0);
             $newTitle = trim((string) ($_POST['conversation_title'] ?? ''));
             $conversation = fetch_conversation($conversationId, (int) $user['id']);
-            if (!in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)) {
-                $_SESSION['flash'] = 'Renaming conversations is available on Plus, Pro, and Business plans.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'conversation_rename')) {
+                $_SESSION['flash'] = 'Renaming conversations is not available on your current plan.';
             } elseif (!$conversation) {
                 $_SESSION['flash'] = 'Conversation not found.';
             } elseif ($newTitle === '') {
@@ -2153,8 +2147,8 @@ if ($user && is_post()) {
         if (isset($_POST['share_conversation'])) {
             $conversationId = (int) ($_POST['conversation_id'] ?? 0);
             $conversation = fetch_conversation($conversationId, (int) $user['id']);
-            if (!in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)) {
-                $_SESSION['flash'] = 'Share snapshots are available on Plus, Pro, and Business plans.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots')) {
+                $_SESSION['flash'] = 'Share snapshots are not available on your current plan.';
             } elseif ($conversation) {
                 enable_conversation_share($conversationId, (int) $user['id']);
                 $_SESSION['flash'] = 'Conversation sharing enabled.';
@@ -2165,8 +2159,8 @@ if ($user && is_post()) {
         if (isset($_POST['revoke_share'])) {
             $conversationId = (int) ($_POST['conversation_id'] ?? 0);
             $conversation = fetch_conversation($conversationId, (int) $user['id']);
-            if (!in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)) {
-                $_SESSION['flash'] = 'Share snapshots are available on Plus, Pro, and Business plans.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots')) {
+                $_SESSION['flash'] = 'Share snapshots are not available on your current plan.';
             } elseif ($conversation) {
                 disable_conversation_share($conversationId, (int) $user['id']);
                 $_SESSION['flash'] = 'Conversation sharing revoked.';
@@ -2177,8 +2171,8 @@ if ($user && is_post()) {
         if (isset($_POST['share_with_team'])) {
             $conversationId = (int) ($_POST['conversation_id'] ?? 0);
             $conversation = fetch_conversation($conversationId, (int) $user['id']);
-            if ((string) ($user['plan'] ?? 'free') !== 'business') {
-                $_SESSION['flash'] = 'Team sharing is only available on the Business plan.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_sharing')) {
+                $_SESSION['flash'] = 'Team sharing is not available on your current plan.';
             } elseif (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
                 $_SESSION['flash'] = 'Enable 2FA in Account settings before using team sharing.';
             } elseif ($conversation && enable_team_conversation_share($conversationId, (int) $user['id'])) {
@@ -2192,8 +2186,8 @@ if ($user && is_post()) {
         if (isset($_POST['unshare_with_team'])) {
             $conversationId = (int) ($_POST['conversation_id'] ?? 0);
             $conversation = fetch_conversation($conversationId, (int) $user['id']);
-            if ((string) ($user['plan'] ?? 'free') !== 'business') {
-                $_SESSION['flash'] = 'Team sharing is only available on the Business plan.';
+            if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_sharing')) {
+                $_SESSION['flash'] = 'Team sharing is not available on your current plan.';
             } elseif ($conversation) {
                 disable_team_conversation_share($conversationId, (int) $user['id']);
                 $_SESSION['flash'] = 'Conversation removed from team sharing.';
@@ -2204,7 +2198,7 @@ if ($user && is_post()) {
         if (isset($_POST['create_api_key'])) {
             $planInfo = plan_limits((string) ($user['plan'] ?? 'free'));
             if (empty($planInfo['api_access'])) {
-                $_SESSION['flash'] = 'API keys are only available on Pro and Business plans.';
+                $_SESSION['flash'] = 'API keys are not available on your current plan.';
             } else {
                 $name = trim((string) ($_POST['api_key_name'] ?? 'Default key'));
                 if ($name === '') {
@@ -2304,7 +2298,7 @@ if ($user) {
         $teamMembers = $ownedTeam ? fetch_team_members((int) $ownedTeam['id']) : [];
         $teamMembership = fetch_user_team_membership((int) $user['id']);
 
-        if ($conversationCount >= (int) $planInfo['max_conversations']) {
+        if ((int)($planInfo['max_conversations'] ?? 0) > 0 && $conversationCount >= (int) $planInfo['max_conversations']) {
             $banner = 'You have used ' . $conversationCount . ' of ' . (int) $planInfo['max_conversations'] . ' chats on the ' . $planInfo['label'] . ' plan.';
         }
 
@@ -2352,16 +2346,16 @@ if ($user) {
             $messageCount = count_conversation_messages((int) $activeConversation['id']);
             $userMessageToday = count_user_messages_today((int) $user['id']);
             $userMessageTotal = count_user_messages_total((int) $user['id']);
-            if (isset($planInfo['max_messages_daily']) && $userMessageToday >= (int) $planInfo['max_messages_daily']) {
+            if (!empty($planInfo['max_messages_daily']) && $userMessageToday >= (int) $planInfo['max_messages_daily']) {
                 $banner = 'You have used all ' . (int) $planInfo['max_messages_daily'] . ' messages for today on the ' . $planInfo['label'] . ' plan.';
-            } elseif (isset($planInfo['max_messages_total']) && $userMessageTotal >= (int) $planInfo['max_messages_total']) {
+            } elseif (!empty($planInfo['max_messages_total']) && $userMessageTotal >= (int) $planInfo['max_messages_total']) {
                 $banner = 'You have used all ' . (int) $planInfo['max_messages_total'] . ' total messages on the ' . $planInfo['label'] . ' plan.';
-            } elseif (isset($planInfo['max_messages_per_conversation']) && $messageCount >= (int) $planInfo['max_messages_per_conversation']) {
+            } elseif (!empty($planInfo['max_messages_per_conversation']) && $messageCount >= (int) $planInfo['max_messages_per_conversation']) {
                 $banner = 'This chat has hit the ' . $planInfo['label'] . ' plan limit of ' . (int) $planInfo['max_messages_per_conversation'] . ' messages.';
             } elseif (!$banner && !empty($planInfo['thinking_available']) && !is_thinking_enabled_for_user($user)) {
                 $banner = 'Thinking is available on your ' . $planInfo['label'] . ' plan but currently switched off.';
             } elseif (!$banner && empty($planInfo['thinking_available'])) {
-                $banner = 'Thinking is disabled on the Free plan. Upgrade to Plus, Pro, or Business to enable it.';
+                $banner = 'Thinking is disabled on your current plan. Upgrade to a plan with Thinking enabled to use it.';
             }
         }
     } catch (Throwable $e) {
@@ -3326,10 +3320,10 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
                 <li><h6 class="dropdown-header">Account</h6></li>
                 <li><button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#accountSettingsModal"><i class="fa-solid fa-gear me-2"></i>Account settings</button></li>
                 <li><a class="dropdown-item" href="/api/"><i class="fa-solid fa-key me-2"></i>API keys & usage</a></li>
-                <?php if (in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)): ?>
+                <?php if (rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots')): ?>
                   <li><button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#personalityModal"><i class="fa-solid fa-sliders me-2"></i>AI personality</button></li>
                 <?php endif; ?>
-                <?php if (in_array((string) ($user['plan'] ?? 'free'), ['free', 'plus', 'pro'], true)): ?>
+                <?php if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_access')): ?>
                   <li><button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#upgradeAccountModal"><i class="fa-solid fa-arrow-up-right-from-square me-2"></i>Upgrade account</button></li>
                 <?php endif; ?>
 
@@ -3367,7 +3361,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
                   <div class="conversation-list">
                     <?php foreach ($myConversations as $conversation): ?>
                       <?php $isActive = $activeConversation && (int) $activeConversation['id'] === (int) $conversation['id']; ?>
-                      <a class="conversation-item <?= $isActive ? 'active' : '' ?> js-conversation-context" href="?c=<?= urlencode((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-id="<?= (int) $conversation['id'] ?>" data-conversation-token="<?= e((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-title="<?= e((string) $conversation['title']) ?>" data-is-owner="<?= !empty($conversation['is_owner']) ? '1' : '0' ?>" data-is-shared="<?= !empty($conversation['share_token']) ? '1' : '0' ?>" data-share-url="<?= !empty($conversation['share_token']) ? e('share.php?s=' . urlencode((string) $conversation['share_token'])) : '' ?>" data-is-team-shared="<?= !empty($conversation['is_team_shared']) ? '1' : '0' ?>" data-can-team-share="<?= (!empty($conversation['is_owner']) && ($teamMembership || $ownedTeam)) ? '1' : '0' ?>" data-can-paid-actions="<?= in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true) ? '1' : '0' ?>">
+                      <a class="conversation-item <?= $isActive ? 'active' : '' ?> js-conversation-context" href="?c=<?= urlencode((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-id="<?= (int) $conversation['id'] ?>" data-conversation-token="<?= e((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-title="<?= e((string) $conversation['title']) ?>" data-is-owner="<?= !empty($conversation['is_owner']) ? '1' : '0' ?>" data-is-shared="<?= !empty($conversation['share_token']) ? '1' : '0' ?>" data-share-url="<?= !empty($conversation['share_token']) ? e('share.php?s=' . urlencode((string) $conversation['share_token'])) : '' ?>" data-is-team-shared="<?= !empty($conversation['is_team_shared']) ? '1' : '0' ?>" data-can-team-share="<?= (!empty($conversation['is_owner']) && ($teamMembership || $ownedTeam)) ? '1' : '0' ?>" data-can-paid-actions="<?= rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots') ? '1' : '0' ?>">
                         <button type="button" class="conversation-menu-trigger js-conversation-menu-trigger" aria-label="Conversation menu"><i class="fa-solid fa-ellipsis"></i></button>
                         <strong><?= e((string) $conversation['title']) ?></strong>
                                 <?php if (!empty($conversation['is_team_shared'])): ?><span><i class="fa-solid fa-users"></i> <?= empty($conversation['is_owner']) ? 'Team · ' . e((string) ($conversation['owner_username'] ?? '')) : 'Shared with team' ?></span><?php endif; ?>
@@ -3392,7 +3386,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
                   <div class="conversation-list">
                     <?php foreach ($teamConversations as $conversation): ?>
                       <?php $isActive = $activeConversation && (int) $activeConversation['id'] === (int) $conversation['id']; ?>
-                      <a class="conversation-item <?= $isActive ? 'active' : '' ?> js-conversation-context" href="?c=<?= urlencode((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-id="<?= (int) $conversation['id'] ?>" data-conversation-token="<?= e((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-title="<?= e((string) $conversation['title']) ?>" data-is-owner="<?= !empty($conversation['is_owner']) ? '1' : '0' ?>" data-is-shared="<?= !empty($conversation['share_token']) ? '1' : '0' ?>" data-share-url="<?= !empty($conversation['share_token']) ? e('share.php?s=' . urlencode((string) $conversation['share_token'])) : '' ?>" data-is-team-shared="<?= !empty($conversation['is_team_shared']) ? '1' : '0' ?>" data-can-team-share="<?= (!empty($conversation['is_owner']) && ($teamMembership || $ownedTeam)) ? '1' : '0' ?>" data-can-paid-actions="<?= in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true) ? '1' : '0' ?>">
+                      <a class="conversation-item <?= $isActive ? 'active' : '' ?> js-conversation-context" href="?c=<?= urlencode((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-id="<?= (int) $conversation['id'] ?>" data-conversation-token="<?= e((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-title="<?= e((string) $conversation['title']) ?>" data-is-owner="<?= !empty($conversation['is_owner']) ? '1' : '0' ?>" data-is-shared="<?= !empty($conversation['share_token']) ? '1' : '0' ?>" data-share-url="<?= !empty($conversation['share_token']) ? e('share.php?s=' . urlencode((string) $conversation['share_token'])) : '' ?>" data-is-team-shared="<?= !empty($conversation['is_team_shared']) ? '1' : '0' ?>" data-can-team-share="<?= (!empty($conversation['is_owner']) && ($teamMembership || $ownedTeam)) ? '1' : '0' ?>" data-can-paid-actions="<?= rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots') ? '1' : '0' ?>">
                         <button type="button" class="conversation-menu-trigger js-conversation-menu-trigger" aria-label="Conversation menu"><i class="fa-solid fa-ellipsis"></i></button>
                         <strong><?= e((string) $conversation['title']) ?></strong>
                                 <span><i class="fa-solid fa-users"></i> <?= !empty($conversation['is_owner']) ? 'Shared with team' : 'Team · ' . e((string) ($conversation['owner_username'] ?? '')) ?></span>
@@ -3413,7 +3407,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
           <div class="conversation-list">
             <?php foreach ($conversations as $conversation): ?>
               <?php $isActive = $activeConversation && (int) $activeConversation['id'] === (int) $conversation['id']; ?>
-              <a class="conversation-item <?= $isActive ? 'active' : '' ?> js-conversation-context" href="?c=<?= urlencode((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-id="<?= (int) $conversation['id'] ?>" data-conversation-token="<?= e((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-title="<?= e((string) $conversation['title']) ?>" data-is-owner="<?= !empty($conversation['is_owner']) ? '1' : '0' ?>" data-is-shared="<?= !empty($conversation['share_token']) ? '1' : '0' ?>" data-share-url="<?= !empty($conversation['share_token']) ? e('share.php?s=' . urlencode((string) $conversation['share_token'])) : '' ?>" data-is-team-shared="<?= !empty($conversation['is_team_shared']) ? '1' : '0' ?>" data-can-team-share="<?= (!empty($conversation['is_owner']) && ($teamMembership || $ownedTeam)) ? '1' : '0' ?>" data-can-paid-actions="<?= in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true) ? '1' : '0' ?>">
+              <a class="conversation-item <?= $isActive ? 'active' : '' ?> js-conversation-context" href="?c=<?= urlencode((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-id="<?= (int) $conversation['id'] ?>" data-conversation-token="<?= e((string) ($conversation['token'] ?? ('legacy-' . (int) $conversation['id']))) ?>" data-conversation-title="<?= e((string) $conversation['title']) ?>" data-is-owner="<?= !empty($conversation['is_owner']) ? '1' : '0' ?>" data-is-shared="<?= !empty($conversation['share_token']) ? '1' : '0' ?>" data-share-url="<?= !empty($conversation['share_token']) ? e('share.php?s=' . urlencode((string) $conversation['share_token'])) : '' ?>" data-is-team-shared="<?= !empty($conversation['is_team_shared']) ? '1' : '0' ?>" data-can-team-share="<?= (!empty($conversation['is_owner']) && ($teamMembership || $ownedTeam)) ? '1' : '0' ?>" data-can-paid-actions="<?= rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots') ? '1' : '0' ?>">
                 <button type="button" class="conversation-menu-trigger js-conversation-menu-trigger" aria-label="Conversation menu"><i class="fa-solid fa-ellipsis"></i></button>
                 <strong><?= e((string) $conversation['title']) ?></strong>
                 <?php if (!empty($conversation['is_team_shared'])): ?><span><i class="fa-solid fa-users"></i> <?= empty($conversation['is_owner']) ? 'Team · ' . e((string) ($conversation['owner_username'] ?? '')) : 'Shared with team' ?></span><?php endif; ?>
@@ -3440,7 +3434,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
         <div class="context-hint">Conversation</div>
         <button type="button" data-context-action="rename"><i class="fa-solid fa-pen"></i> Rename</button>
         <button type="button" data-context-action="snapshot"><i class="fa-solid fa-share-nodes"></i> <span data-context-label="snapshot">Share snapshot</span></button>
-        <?php if ((string) ($user['plan'] ?? 'free') === 'business'): ?>
+        <?php if (rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_access')): ?>
           <button type="button" data-context-action="team"><i class="fa-solid fa-users"></i> <span data-context-label="team">Share with team</span></button>
         <?php endif; ?>
         <button type="button" class="danger" data-context-action="delete"><i class="fa-solid fa-trash"></i> Delete</button>
@@ -3490,7 +3484,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
               </form>
               <?php endif; ?>
             <?php endif; ?>
-            <?php if (in_array((string) ($user['plan'] ?? 'free'), ['free', 'plus', 'pro'], true)): ?>
+            <?php if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_access')): ?>
               <button type="button" class="ghost-btn upgrade-topbar-btn" data-bs-toggle="modal" data-bs-target="#upgradeAccountModal"><i class="fa-solid fa-arrow-up-right-from-square"></i> <span>Upgrade account</span></button>
             <?php endif; ?>
             <div class="dropdown notifications-menu">
@@ -3534,7 +3528,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
                 <li><h6 class="dropdown-header"><?= e((string) $user['username']) ?> · <?= e((string) $planInfo['label']) ?> plan</h6></li>
                 <li><a class="dropdown-item" href="/"><i class="fa-solid fa-comments me-2"></i>Chat workspace</a></li>
                 <li><button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#accountSettingsModal"><i class="fa-solid fa-gear me-2"></i>Account settings</button></li>
-                <?php if ((string) ($user['plan'] ?? 'free') === 'business'): ?>
+                <?php if (rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_access')): ?>
                   <li><a class="dropdown-item" href="/teams/<?= $ownedTeam ? '?t=' . urlencode((string) $ownedTeam['token']) : '' ?>"><i class="fa-solid fa-users me-2"></i>Manage team</a></li>
                 <?php endif; ?>
                 <li><a class="dropdown-item" href="/api/"><i class="fa-solid fa-key me-2"></i>API keys & usage</a></li>
@@ -3555,7 +3549,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
                     <?php endif; ?>
                   </form>
                 </li>
-                <?php if (in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)): ?>
+                <?php if (rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots')): ?>
                   <li><button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#personalityModal"><i class="fa-solid fa-sliders me-2"></i>AI personality</button></li>
                 <?php endif; ?>
                 <li><hr class="dropdown-divider"></li>
@@ -3773,48 +3767,36 @@ if ($user && !two_factor_enabled_for_user($user)) {
 <div class="modal fade personality-modal" id="upgradeAccountModal" tabindex="-1" aria-labelledby="upgradeAccountModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><div class="sidebar-section-label" style="margin:0 0 6px;">Upgrade</div><h5 class="modal-title" id="upgradeAccountModalLabel">Upgrade account</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body">
             <div style="margin-bottom:14px;color:var(--muted);line-height:1.6;">Pick a plan and continue to checkout. Current plan: <strong style="color:var(--text)"><?= e((string) $planInfo['label']) ?></strong>.</div>
+            <?php
+            $upgradePlans = rook_enabled_paid_plans();
+            $comparePlans = array_filter(rook_plan_definitions(), static fn($comparePlan): bool => !empty($comparePlan['enabled']));
+            ?>
             <div class="upgrade-cards">
-              <div class="upgrade-card">
-                <div class="upgrade-card-body">
-                  <div class="sidebar-section-label">Plus</div>
-                  <div class="upgrade-card-title">Reasoning unlocked</div>
-                  <div class="upgrade-card-price">£9<small>/month</small></div>
-                  <p>Perfect if you want smarter day-to-day chat, reasoning, and personality controls without going full API goblin.</p>
+              <?php foreach ($upgradePlans as $slug => $upgradePlan): ?>
+                <div class="upgrade-card <?= !empty($upgradePlan['recommended']) ? 'is-recommended' : '' ?>">
+                  <?php if (!empty($upgradePlan['recommended'])): ?><div class="upgrade-card-badge">Recommended</div><?php endif; ?>
+                  <div class="upgrade-card-body">
+                    <div class="sidebar-section-label"><?= e((string) $upgradePlan['label']) ?></div>
+                    <div class="upgrade-card-title"><?= e((string) ($upgradePlan['tagline'] ?? '')) ?></div>
+                    <div class="upgrade-card-price">&pound;<?= e(number_format((float)($upgradePlan['price_gbp'] ?? 0), 0)) ?><small>/month</small></div>
+                    <p><?= e((string) ($upgradePlan['description'] ?? '')) ?></p>
+                  </div>
+                  <button type="button" class="new-chat-btn" onclick="window.location.href='upgrade?plan=<?= e($slug) ?>'">Upgrade now</button>
                 </div>
-                <button type="button" class="new-chat-btn" onclick="window.location.href='upgrade?plan=plus'">Upgrade now</button>
-              </div>
-              <div class="upgrade-card is-recommended">
-                <div class="upgrade-card-badge">Recommended</div>
-                <div class="upgrade-card-body">
-                  <div class="sidebar-section-label">Pro</div>
-                  <div class="upgrade-card-title">API + serious limits</div>
-                  <div class="upgrade-card-price">£19<small>/month</small></div>
-                  <p>Best for power users who want higher limits, API access, and room to do real work without hitting ceilings.</p>
-                </div>
-                <button type="button" class="new-chat-btn" onclick="window.location.href='upgrade?plan=pro'">Upgrade now</button>
-              </div>
-              <div class="upgrade-card">
-                <div class="upgrade-card-body">
-                  <div class="sidebar-section-label">Business</div>
-                  <div class="upgrade-card-title">Teams + heavy usage</div>
-                  <div class="upgrade-card-price">£49<small>/month</small></div>
-                  <p>For teams or high-volume use when you need shared access, broad limits, API access, and less chance of running into annoying caps.</p>
-                </div>
-                <button type="button" class="new-chat-btn" onclick="window.location.href='upgrade?plan=business'">Upgrade now</button>
-              </div>
+              <?php endforeach; ?>
             </div>
             <div class="plan-compare-table-wrap">
               <table class="plan-compare-table">
-                <thead><tr><th>Feature</th><th class="<?= (($user['plan'] ?? 'free') === 'free') ? 'is-current' : '' ?>">Free</th><th class="<?= (($user['plan'] ?? 'free') === 'plus') ? 'is-current' : '' ?>">Plus</th><th class="<?= (($user['plan'] ?? 'free') === 'pro') ? 'is-current' : '' ?>">Pro</th><th class="<?= (($user['plan'] ?? 'free') === 'business') ? 'is-current' : '' ?>">Business</th></tr></thead>
+                <thead><tr><th>Feature</th><?php foreach ($comparePlans as $slug => $comparePlan): ?><th class="<?= (($user['plan'] ?? 'free') === $slug) ? 'is-current' : '' ?>"><?= e((string)$comparePlan['label']) ?></th><?php endforeach; ?></tr></thead>
                 <tbody>
-                  <tr><td>Conversation limit</td><td>1</td><td>10</td><td>50</td><td>250</td></tr>
-                  <tr><td>Message allowance</td><td>10 / day</td><td>200 / chat</td><td>1000 / chat</td><td>5000 / chat</td></tr>
-                  <tr><td>Reasoning / Thinking</td><td class="muted-cell">No</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-                  <tr><td>AI personality controls</td><td class="muted-cell">No</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-                  <tr><td>API access</td><td class="muted-cell">No</td><td class="muted-cell">No</td><td>Yes</td><td>Yes</td></tr>
-                  <tr><td>API daily call limit</td><td class="muted-cell">None</td><td class="muted-cell">None</td><td>1000 / day</td><td>Unlimited</td></tr>
-                  <tr><td>Teams</td><td class="muted-cell">No</td><td class="muted-cell">No</td><td class="muted-cell">No</td><td>Yes</td></tr>
-                  <tr><td>Best for</td><td class="muted-cell">Trying it out</td><td>Everyday chat + reasoning</td><td>Power users + API work</td><td>Heavy production usage + teams</td></tr>
+                  <tr><td>Conversation limit</td><?php foreach ($comparePlans as $comparePlan): ?><td><?= (int)$comparePlan['max_conversations'] > 0 ? (int)$comparePlan['max_conversations'] : 'Unlimited' ?></td><?php endforeach; ?></tr>
+                  <tr><td>Message allowance</td><?php foreach ($comparePlans as $comparePlan): ?><td><?= e(rook_message_allowance_label($comparePlan)) ?></td><?php endforeach; ?></tr>
+                  <tr><td>Reasoning / Thinking</td><?php foreach ($comparePlans as $comparePlan): ?><td class="<?= empty($comparePlan['thinking_available']) ? 'muted-cell' : '' ?>"><?= !empty($comparePlan['thinking_available']) ? 'Yes' : 'No' ?></td><?php endforeach; ?></tr>
+                  <tr><td>AI personality controls</td><?php foreach ($comparePlans as $comparePlan): ?><td class="<?= empty($comparePlan['custom_personality']) ? 'muted-cell' : '' ?>"><?= !empty($comparePlan['custom_personality']) ? 'Yes' : 'No' ?></td><?php endforeach; ?></tr>
+                  <tr><td>Share snapshots</td><?php foreach ($comparePlans as $comparePlan): ?><td class="<?= empty($comparePlan['share_snapshots']) ? 'muted-cell' : '' ?>"><?= !empty($comparePlan['share_snapshots']) ? 'Yes' : 'No' ?></td><?php endforeach; ?></tr>
+                  <tr><td>API access</td><?php foreach ($comparePlans as $comparePlan): ?><td class="<?= empty($comparePlan['api_access']) ? 'muted-cell' : '' ?>"><?= !empty($comparePlan['api_access']) ? 'Yes' : 'No' ?></td><?php endforeach; ?></tr>
+                  <tr><td>API daily call limit</td><?php foreach ($comparePlans as $comparePlan): ?><td><?= !empty($comparePlan['api_access']) ? ((int)$comparePlan['api_call_limit'] > 0 ? (int)$comparePlan['api_call_limit'] . ' / day' : 'Unlimited') : 'None' ?></td><?php endforeach; ?></tr>
+                  <tr><td>Teams</td><?php foreach ($comparePlans as $comparePlan): ?><td class="<?= empty($comparePlan['team_access']) ? 'muted-cell' : '' ?>"><?= !empty($comparePlan['team_access']) ? 'Yes' : 'No' ?></td><?php endforeach; ?></tr>
                 </tbody>
               </table>
             </div>
@@ -3837,9 +3819,9 @@ if ($user && !two_factor_enabled_for_user($user)) {
           <div class="mini-stat"><span>API today</span><strong id="todayApiCallsStat"><?= (int) $todayApiCalls ?></strong></div>
         </div>
         <div id="workspaceUsageText" style="margin-top:16px; color:var(--muted); font-size:0.92rem; line-height:1.7;">
-          <?php if (isset($planInfo['max_messages_daily'])): ?>
+          <?php if (!empty($planInfo['max_messages_daily'])): ?>
             Messages today: <strong id="messagesUsedStat" style="color:var(--text)"><?= (int) $userMessageToday ?> / <?= (int) $planInfo['max_messages_daily'] ?></strong><br>
-          <?php elseif (isset($planInfo['max_messages_total'])): ?>
+          <?php elseif (!empty($planInfo['max_messages_total'])): ?>
             Messages used: <strong id="messagesUsedStat" style="color:var(--text)"><?= (int) $userMessageTotal ?> / <?= (int) $planInfo['max_messages_total'] ?></strong><br>
           <?php else: ?>
             Messages per chat: <strong id="messagesPerChatStat" style="color:var(--text)"><?= (int) $planInfo['max_messages_per_conversation'] ?></strong><br>
@@ -3855,7 +3837,7 @@ if ($user && !two_factor_enabled_for_user($user)) {
 </div>
 <?php endif; ?>
 
-<?php if ($user && in_array((string) ($user['plan'] ?? 'free'), ['plus', 'pro', 'business'], true)): ?>
+<?php if ($user && rook_plan_supports((string) ($user['plan'] ?? 'free'), 'share_snapshots')): ?>
 <div class="modal fade personality-modal" id="personalityModal" tabindex="-1" aria-labelledby="personalityModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">

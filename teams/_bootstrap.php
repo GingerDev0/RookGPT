@@ -5,6 +5,7 @@ date_default_timezone_set('Europe/London');
 session_start();
 require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/security.php';
+require_once __DIR__ . '/../lib/plans.php';
 csrf_bootstrap_web();
 
 
@@ -131,8 +132,9 @@ function ensure_team_schema(): void
     } catch (Throwable $e) {
         // Already exists, unsupported DDL, or duplicate legacy memberships need manual cleanup.
     }
+    try { db_execute('ALTER TABLE team_members MODIFY COLUMN pre_team_plan VARCHAR(64) NULL'); } catch (Throwable $e) {}
     try {
-        db_execute('ALTER TABLE team_members ADD COLUMN pre_team_plan ENUM("free","plus","pro","business") NULL AFTER can_manage_api_keys');
+        db_execute('ALTER TABLE team_members ADD COLUMN pre_team_plan VARCHAR(64) NULL AFTER can_manage_api_keys');
     } catch (Throwable $e) {
         // Column already exists or table has not been created yet.
     }
@@ -227,6 +229,16 @@ function ensure_team_chat_schema(): void
             KEY idx_team_chat_delete_events_created_at (created_at),
             CONSTRAINT fk_team_chat_delete_events_team FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE,
             CONSTRAINT fk_team_chat_delete_events_actor FOREIGN KEY (actor_user_id) REFERENCES users (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+        db_execute('CREATE TABLE IF NOT EXISTS team_chat_typing (
+            team_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            is_typing TINYINT(1) NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (team_id, user_id),
+            KEY idx_team_chat_typing_team_updated (team_id, updated_at),
+            CONSTRAINT fk_team_chat_typing_team FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE,
+            CONSTRAINT fk_team_chat_typing_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
         backfill_team_chat_encryption();
     } catch (Throwable $e) {
@@ -490,6 +502,45 @@ function fetch_recent_team_chat_deletions(int $teamId, int $seconds = 8): array
         "SELECT event_type, message_id FROM team_chat_delete_events WHERE team_id = ? AND created_at >= (NOW() - INTERVAL $seconds SECOND) ORDER BY id ASC LIMIT 500",
         'i',
         [$teamId]
+    );
+}
+
+function set_team_chat_typing(int $teamId, int $userId, bool $isTyping): void
+{
+    ensure_team_chat_schema();
+    db_execute(
+        'INSERT INTO team_chat_typing (team_id, user_id, is_typing, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE is_typing = VALUES(is_typing), updated_at = NOW()',
+        'iii',
+        [$teamId, $userId, $isTyping ? 1 : 0]
+    );
+}
+
+function clear_stale_team_chat_typing(int $teamId, int $seconds = 5): void
+{
+    ensure_team_chat_schema();
+    $seconds = max(3, min(30, $seconds));
+    db_execute(
+        "UPDATE team_chat_typing SET is_typing = 0 WHERE team_id = ? AND updated_at < (NOW() - INTERVAL $seconds SECOND)",
+        'i',
+        [$teamId]
+    );
+}
+
+function fetch_team_chat_typing_users(int $teamId, int $excludeUserId = 0, int $seconds = 5): array
+{
+    ensure_team_chat_schema();
+    clear_stale_team_chat_typing($teamId, $seconds);
+    $seconds = max(3, min(30, $seconds));
+    $excludeUserId = max(0, $excludeUserId);
+    return db_fetch_all(
+        "SELECT tct.user_id, u.username, tct.updated_at
+         FROM team_chat_typing tct
+         INNER JOIN users u ON u.id = tct.user_id
+         WHERE tct.team_id = ? AND tct.user_id != ? AND tct.is_typing = 1 AND tct.updated_at >= (NOW() - INTERVAL $seconds SECOND)
+         ORDER BY tct.updated_at DESC
+         LIMIT 5",
+        'ii',
+        [$teamId, $excludeUserId]
     );
 }
 
@@ -779,7 +830,7 @@ function current_user(): ?array
 
 function plan_label(string $plan): string
 {
-    return ['free' => 'Free', 'plus' => 'Plus', 'pro' => 'Pro', 'business' => 'Business'][$plan] ?? 'Free';
+    return rook_plan_label($plan);
 }
 
 function fetch_owned_team(int $ownerUserId): ?array
@@ -958,7 +1009,8 @@ function add_owner_membership(int $teamId, int $ownerUserId): void
     $prePlan = (string) ($owner['plan'] ?? 'free');
     $preThinking = (int) ($owner['thinking_enabled'] ?? 0);
     db_execute('INSERT IGNORE INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, can_view_api_keys, can_manage_api_keys, pre_team_plan, pre_team_thinking_enabled, created_at) VALUES (?, ?, "owner", 1, 1, 1, 1, 1, ?, ?, NOW())', 'iisi', [$teamId, $ownerUserId, $prePlan, $preThinking]);
-    db_execute('UPDATE users SET plan = "business", thinking_enabled = 1 WHERE id = ?', 'i', [$ownerUserId]);
+    $teamPlan = rook_first_enabled_plan_with('team_access', 'business');
+    db_execute('UPDATE users SET plan = ?, thinking_enabled = 1 WHERE id = ?', 'si', [$teamPlan, $ownerUserId]);
 }
 
 function restore_user_pre_team_plan(int $userId, ?string $preTeamPlan = null, ?int $preTeamThinkingEnabled = null): void
@@ -967,8 +1019,7 @@ function restore_user_pre_team_plan(int $userId, ?string $preTeamPlan = null, ?i
     $ownsTeam = db_fetch_one('SELECT id FROM teams WHERE owner_user_id = ? LIMIT 1', 'i', [$userId]);
     if ($stillInTeam || $ownsTeam) return;
 
-    $allowedPlans = ['free', 'plus', 'pro', 'business'];
-    $plan = in_array((string) $preTeamPlan, $allowedPlans, true) ? (string) $preTeamPlan : 'free';
+    $plan = array_key_exists((string) $preTeamPlan, rook_plan_definitions()) ? (string) $preTeamPlan : 'free';
     $thinking = $preTeamThinkingEnabled === null ? ($plan === 'free' ? 0 : 1) : (int) $preTeamThinkingEnabled;
     db_execute('UPDATE users SET plan = ?, thinking_enabled = ? WHERE id = ?', 'sii', [$plan, $thinking, $userId]);
 }
@@ -1001,8 +1052,8 @@ ensure_notifications_schema();
 $user = current_user();
 if (!$user) redirect_to('index.php');
 
-if ((string) ($user['plan'] ?? 'free') !== 'business') {
-    $_SESSION['flash'] = 'Teams are only available on the Business plan.';
+if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_access')) {
+    $_SESSION['flash'] = 'Teams are not available on your current plan.';
     redirect_to('index.php');
 }
 if (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
