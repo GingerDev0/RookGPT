@@ -14,7 +14,7 @@ if (!$activeTeam): ?>
         <div class="notice" style="margin-top:12px;">No global team API keys yet.</div>
       <?php else: ?>
         <?php foreach ($teamApiKeys as $key): ?>
-          <?php $plainKey = ''; $maskedKey = masked_api_key_from_parts($key['key_prefix'] ?? '', $key['key_suffix'] ?? '', (int)$key['id']); ?>
+          <?php $plainKey = (string) ($key['plain_key'] ?? ''); $maskedKey = masked_api_key_from_parts($key['key_prefix'] ?? '', $key['key_suffix'] ?? '', (int)$key['id']); ?>
           <div class="member">
             <div class="member-head">
               <div>
@@ -38,7 +38,7 @@ if (!$activeTeam): ?>
             </div>
             <div class="key-row">
               <code class="key-preview"><?= e($maskedKey) ?></code>
-              <button class="btn-ghost copy-team-key" type="button" data-key="<?= e($plainKey) ?>" <?= $plainKey === '' ? 'disabled' : '' ?>><i class="fa-regular fa-copy me-2"></i>Copy</button>
+              <?php if ($plainKey !== ''): ?><button class="btn-ghost copy-team-key" type="button" data-key="<?= e($plainKey) ?>"><i class="fa-regular fa-copy me-2"></i>Copy</button><?php else: ?><button class="btn-ghost" type="button" disabled title="This key was created before encrypted key copying was available. Rotate it to generate a copyable key."><i class="fa-regular fa-copy me-2"></i>Rotate to copy</button><?php endif; ?>
             </div>
           </div>
         <?php endforeach; ?>

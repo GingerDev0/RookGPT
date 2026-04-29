@@ -22,7 +22,7 @@
 
 ## ✨ Overview
 
-**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, configurable plans and pricing, promo codes, subscriptions, team workspaces, API keys, configurable 2FA-protected team access, admin controls, and a simple authenticated chat API.
+**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, API keys, configurable 2FA-protected team access, admin controls, and a simple authenticated chat API.
 
 The app can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
 
@@ -40,24 +40,10 @@ The app can run against a local Ollama model or a hosted AI provider such as **O
 - 🧾 User API key management with masked key previews
 - 🌐 Public JSON chat endpoint at `/api`
 - 📚 API dashboard, docs, playground, usage charts, and key management pages
-- 🧰 Admin dashboard for users, configurable plans/pricing, promo codes, API keys, notifications, activity logs, and app settings
+- 🧰 Admin dashboard for users, plans, API keys, notifications, activity logs, and app settings
 - 🪄 Installer wizard that writes `config/app.php`, imports the schema, creates the owner admin, and signs the admin in
 - 💳 Stripe secret key support for upgrade/checkout wiring
 - 🔗 Extensionless routes through `.htaccess`
-
-## 🆕 Recent Changes
-
-- Added full admin plan management from `/admin/prices`
-- Plans now support configurable labels, pricing, limits, feature gates, sort order, enabled/disabled state, and recommended status
-- Added modal-based Add, Edit, Disable, and Delete actions for plans
-- Added promo-code management from `/admin/promo`
-- Promo codes can be created, edited, enabled/disabled, deleted, and targeted to plans
-- Upgrade checkout now reads active plans and pricing from `config/app.php`
-- Disabled plans are hidden from the upgrade modal and comparison table
-- Feature gating now uses configurable plan definitions instead of hard-coded plan checks
-- Team access, team sharing, API access, thinking/reasoning, AI personality controls, conversation rename, and share snapshots can be controlled per plan
-- Deleting a plan now moves assigned users back to Free and disables promo codes targeting that deleted plan
-- Added live typing indicators in `/teams/chat` so team members can see when another user is typing
 
 ## 🧱 Tech Stack
 
@@ -181,8 +167,6 @@ The installer and admin settings page can fetch available models from the select
 | `/` | Main chat app |
 | `/install/` | Installation wizard |
 | `/admin/` | Admin dashboard |
-| `/admin/prices` | Plan, pricing, feature, and limit management |
-| `/admin/promo` | Promo-code management |
 | `/api/` | API dashboard |
 | `/api` | JSON chat API endpoint |
 | `/api/docs` | API documentation |
@@ -190,7 +174,6 @@ The installer and admin settings page can fetch available models from the select
 | `/api/keys` | API key management |
 | `/api/usage` | API usage analytics |
 | `/teams/` | Teams dashboard |
-| `/teams/chat` | Team chat with live typing indicators |
 | `/upgrade` | Upgrade/cart page |
 | `/share` | Shared conversation route |
 | `/terms` | Terms of Service |
@@ -249,45 +232,18 @@ curl -X POST https://your-domain.com/api \
 | `top_k` | integer | No | Ollama option; defaults to `64` |
 | `think` | boolean | No | Enables model thinking output when supported |
 
-## 💼 Plans, Pricing, and Feature Gates
+## 💼 Plans and API Limits
 
-Plans are configurable from `/admin/prices` and stored in `config/app.php`. Admins can add, edit, disable, or delete plans without changing code.
+The app currently recognises these plan levels:
 
-Each plan can control:
+| Plan | API access | Daily API calls |
+|---|---:|---:|
+| Free | No | 0 |
+| Plus | No | 0 |
+| Pro | Yes | 1,000 |
+| Business | Yes | Unlimited |
 
-- Monthly price
-- Marketing label, tagline, and description
-- Maximum conversations
-- Daily messages
-- Messages per chat
-- Total messages
-- API daily calls
-- Recommended status
-- Enabled/disabled state
-- Thinking/reasoning access
-- API access
-- AI personality controls
-- Conversation rename
-- Share snapshots
-- Teams access
-- Team sharing
-
-Suggested default plan structure:
-
-| Plan | Suggested price | Best for | API access | Teams |
-|---|---:|---|---:|---:|
-| Free | £0/month | Trying RookGPT | No | No |
-| Plus | £9/month | Regular individual users | No | No |
-| Pro | £19/month | Power users and developers | Yes | No |
-| Business | £49/month | Teams and companies | Yes | Yes |
-
-Deleting a plan moves assigned users back to Free and disables promo codes that targeted the deleted plan.
-
-## 🏷️ Promo Codes
-
-Promo codes can be managed from `/admin/promo`. Admins can create and manage discounts for checkout, including enabling or disabling codes and targeting them to specific plans.
-
-Promo-code support is integrated with the upgrade flow so discounts are validated before checkout totals are calculated.
+Admin users can manage user plans from the admin area.
 
 ## 🔐 Two-Factor Authentication
 
@@ -298,12 +254,12 @@ Team features can require 2FA when enabled in `/admin/settings`. Users can enabl
 ## 📁 Project Structure
 
 ```text
-admin/                 Admin dashboard pages, plans, pricing, and promo codes
+admin/                 Admin dashboard pages
 api/                   API dashboard, docs, keys, playground, usage
 config/                App configuration
 install/               Web installer
 lib/                   Shared provider, security, image, and install helpers
-teams/                 Team workspace pages and team chat
+teams/                 Team workspace pages
 api.php                Public JSON API endpoint
 index.php              Main chat application
 rook.css               Shared app styling
@@ -331,7 +287,6 @@ privacy.php            Privacy page
 - `/api` is intentionally the JSON endpoint, while `/api/` is the web dashboard.
 - Explicit `.php` browser requests are redirected to extensionless URLs for cleaner routes.
 - Provider model fetching is handled in `lib/ai_providers.php`.
-- Plan definitions and feature gates are handled through config-backed plan helpers.
 
 ## 🤝 Contributing
 

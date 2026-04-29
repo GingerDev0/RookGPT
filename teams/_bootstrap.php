@@ -978,7 +978,13 @@ function create_team_api_key(int $ownerUserId, int $teamId, string $name): array
 
 function fetch_team_api_keys(int $teamId): array
 {
-    return db_fetch_all('SELECT ak.id, ak.name, ak.key_prefix, ak.key_suffix, ak.last_used_at, ak.revoked_at, ak.created_at, u.username AS owner_username, COUNT(al.id) AS request_count, COALESCE(SUM(al.prompt_eval_count + al.eval_count), 0) AS token_count FROM api_keys ak INNER JOIN users u ON u.id = ak.user_id LEFT JOIN api_logs al ON al.api_key_id = ak.id WHERE ak.team_id = ? AND ak.revoked_at IS NULL GROUP BY ak.id, ak.name, ak.key_prefix, ak.key_suffix, ak.last_used_at, ak.revoked_at, ak.created_at, u.username ORDER BY ak.id DESC', 'i', [$teamId]);
+    $keys = db_fetch_all('SELECT ak.id, ak.name, ak.key_prefix, ak.key_suffix, ak.secret_cipher, ak.last_used_at, ak.revoked_at, ak.created_at, u.username AS owner_username, COUNT(al.id) AS request_count, COALESCE(SUM(al.prompt_eval_count + al.eval_count), 0) AS token_count FROM api_keys ak INNER JOIN users u ON u.id = ak.user_id LEFT JOIN api_logs al ON al.api_key_id = ak.id WHERE ak.team_id = ? AND ak.revoked_at IS NULL GROUP BY ak.id, ak.name, ak.key_prefix, ak.key_suffix, ak.secret_cipher, ak.last_used_at, ak.revoked_at, ak.created_at, u.username ORDER BY ak.id DESC', 'i', [$teamId]);
+    foreach ($keys as &$key) {
+        $key['plain_key'] = api_key_secret_decrypt($key['secret_cipher'] ?? null);
+        unset($key['secret_cipher']);
+    }
+    unset($key);
+    return $keys;
 }
 
 function delete_team_api_key(int $teamId, int $keyId): bool
