@@ -1,0 +1,18 @@
+Options -Indexes
+
+<IfModule mod_php.c>
+  php_flag engine off
+</IfModule>
+
+<FilesMatch "\.(php|phtml|phar|cgi|pl|asp|aspx|jsp)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(png|jpe?g|gif|webp)$">
+    Header set X-Content-Type-Options "nosniff"
+  </FilesMatch>
+</IfModule>
+
+# Chat image files are served through /chat-image.php after access checks.
+RedirectMatch 404 ^/uploads/chat-images/.*$

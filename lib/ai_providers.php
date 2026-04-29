@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/security.php';
 
 function rook_ai_providers(): array
 {
@@ -112,6 +113,7 @@ function rook_ai_fetch_models(string $providerKey, string $chatEndpoint = '', st
     if (!empty($providers[$providerKey]['needs_key']) && trim($apiKey) === '') throw new RuntimeException($providers[$providerKey]['name'] . ' needs an API key before models can be fetched.');
     $url = rook_ai_models_endpoint_for($providerKey, $chatEndpoint);
     if ($url === '' || !preg_match('#^https?://#i', $url)) throw new RuntimeException('Model list endpoint is not configured.');
+    rook_validate_outbound_http_url($url, $providerKey === 'ollama');
     $ch = curl_init($url);
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_HTTPHEADER=>rook_ai_model_fetch_headers($providerKey, $apiKey), CURLOPT_TIMEOUT=>$timeout]);
     $raw = curl_exec($ch); $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); $error = curl_error($ch); curl_close($ch);
@@ -186,6 +188,7 @@ function rook_ai_post_json(array $payload, int $timeout = 600): array
 {
     $endpoint = rook_ai_endpoint();
     if ($endpoint === '') throw new RuntimeException('AI provider endpoint is not configured.');
+    rook_validate_outbound_http_url($endpoint, rook_ai_is_ollama());
     $ch = curl_init($endpoint);
     curl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_RETURNTRANSFER=>true, CURLOPT_HTTPHEADER=>rook_ai_headers(), CURLOPT_POSTFIELDS=>json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), CURLOPT_TIMEOUT=>$timeout]);
     $raw = curl_exec($ch); $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); $error = curl_error($ch); curl_close($ch);

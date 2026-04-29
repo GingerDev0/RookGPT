@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/_bootstrap.php';
-$user = require_admin();
+$user = require_admin_role(['owner']);
 $messages = [];
 $errors = [];
 
@@ -17,7 +17,17 @@ if (is_post()) {
         ];
         $providers = rook_ai_providers();
         if (!isset($providers[$values['ai_provider']])) $errors[] = 'Choose a supported AI provider.';
-        if ($values['ai_base_url'] === '' || !preg_match('#^https?://#i', $values['ai_base_url'])) $errors[] = 'Enter a valid AI endpoint URL.';
+        if ($values['ai_base_url'] === '' || !preg_match('#^https?://#i', $values['ai_base_url'])) {
+            $errors[] = 'Enter a valid AI endpoint URL.';
+        } else {
+            try {
+                rook_validate_outbound_http_url($values['ai_base_url'], $values['ai_provider'] === 'ollama');
+            } catch (Throwable $e) {
+                $errors[] = $values['ai_provider'] === 'ollama'
+                    ? 'Ollama endpoints may be local, but must still be valid HTTP(S) URLs.'
+                    : 'Non-Ollama AI endpoints must resolve to public IP addresses.';
+            }
+        }
         if ($values['ai_model'] === '') $errors[] = 'Enter an AI model.';
         if (isset($providers[$values['ai_provider']]) && !empty($providers[$values['ai_provider']]['needs_key']) && $values['ai_api_key'] === '') $errors[] = $providers[$values['ai_provider']]['name'] . ' needs an API key.';
         if ($values['app_name'] === '') $errors[] = 'Enter an app name.';

@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-session_start();
-require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/security.php';
+rook_hardened_session_start();
+require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/plans.php';
 csrf_bootstrap_web();
 date_default_timezone_set('Europe/London');
@@ -46,7 +46,7 @@ function ensure_auth_security_schema(): void
         if (!db_column_exists_auth('users', 'two_factor_enabled_at')) db()->query("ALTER TABLE users ADD COLUMN two_factor_enabled_at DATETIME NULL AFTER two_factor_secret");
     } catch (Throwable $e) {}
 }
-function clear_local_session(?string $flash = null): void { $_SESSION=[]; session_destroy(); session_start(); if($flash) $_SESSION['flash']=$flash; }
+function clear_local_session(?string $flash = null): void { rook_safe_restart_session(); if($flash) $_SESSION['flash']=$flash; }
 function current_user(): ?array
 {
     ensure_auth_security_schema();

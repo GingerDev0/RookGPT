@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/lib/install_guard.php';
+require_once __DIR__ . '/lib/image_storage.php';
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
@@ -79,9 +80,9 @@ function decode_message_images(?string $imagesJson): array
         $name = mb_substr((string) ($image['name'] ?? 'Uploaded image'), 0, 120);
         $data = (string) ($image['data'] ?? '');
         $path = (string) ($image['path'] ?? '');
-        if ($data === '' && $path !== '') {
-            $full = __DIR__ . '/' . ltrim($path, '/');
-            if (is_file($full) && filesize($full) <= 8 * 1024 * 1024) {
+        if ($data === '') {
+            $full = chat_image_readable_path($image);
+            if ($full !== '' && is_file($full) && filesize($full) <= 8 * 1024 * 1024) {
                 $raw = file_get_contents($full);
                 if ($raw !== false) $data = base64_encode($raw);
             }
@@ -131,6 +132,7 @@ if ($shareToken !== '') {
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js" defer></script>
   <style>
     :root {
@@ -1067,9 +1069,29 @@ if ($shareToken !== '') {
       marked.setOptions({ breaks: true, gfm: true });
     }
 
+    function sanitizeRenderedHtml(html) {
+      return window.DOMPurify
+        ? DOMPurify.sanitize(html, {
+            USE_PROFILES: { html: true },
+            FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+            FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
+          })
+        : html;
+    }
+    function hardenRenderedLinks(scope) {
+      scope.querySelectorAll('a').forEach((a) => {
+        const href = a.getAttribute('href') || '';
+        if (/^\s*javascript:/i.test(href) || /^\s*data:/i.test(href)) a.removeAttribute('href');
+        a.setAttribute('rel', 'noopener noreferrer nofollow');
+        a.setAttribute('target', '_blank');
+      });
+    }
+
     document.querySelectorAll('.js-render-markdown').forEach((node) => {
       const raw = node.textContent || '';
-      node.innerHTML = window.marked ? marked.parse(raw) : raw.replace(/\n/g, '<br>');
+      const html = window.marked ? marked.parse(raw) : raw.replace(/\n/g, '<br>');
+      node.innerHTML = sanitizeRenderedHtml(html);
+      hardenRenderedLinks(node);
       if (window.hljs) {
         node.querySelectorAll('pre code').forEach((block) => window.hljs.highlightElement(block));
       }

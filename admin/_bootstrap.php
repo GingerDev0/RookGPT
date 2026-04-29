@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-session_start();
-require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/security.php';
+rook_hardened_session_start();
+require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/plans.php';
 csrf_bootstrap_web();
 date_default_timezone_set('Europe/London');
@@ -116,7 +116,7 @@ function ensure_auth_security_schema(): void
         if (!db_column_exists_auth('users', 'two_factor_enabled_at')) db()->query("ALTER TABLE users ADD COLUMN two_factor_enabled_at DATETIME NULL AFTER two_factor_secret");
     } catch (Throwable $e) {}
 }
-function clear_local_session(?string $flash = null): void { $_SESSION=[]; session_destroy(); session_start(); if($flash) $_SESSION['flash']=$flash; }
+function clear_local_session(?string $flash = null): void { rook_safe_restart_session(); if($flash) $_SESSION['flash']=$flash; }
 function current_user(): ?array
 {
     ensure_auth_security_schema();
@@ -128,10 +128,12 @@ function current_user(): ?array
     if ($sessionToken === '' || $currentToken === '' || !hash_equals($currentToken, $sessionToken)) { clear_local_session('You were signed out because this account was used on another device.'); return null; }
     return $row;
 }
-function is_admin_user(int $userId): bool { $row = db_fetch_one('SELECT id FROM admins WHERE user_id = ? AND is_active = 1 LIMIT 1', 'i', [$userId]); return (bool) $row; }
-function bootstrap_first_admin(array $user): void { $row = db_fetch_one('SELECT COUNT(*) AS total FROM admins WHERE is_active = 1'); if ((int)($row['total'] ?? 0) === 0) db_insert('INSERT INTO admins (user_id, role, is_active, created_by_user_id) VALUES (?, "owner", 1, ?)', 'ii', [(int)$user['id'], (int)$user['id']]); }
+function current_admin_role(int $userId): ?string { $row = db_fetch_one('SELECT role FROM admins WHERE user_id = ? AND is_active = 1 LIMIT 1', 'i', [$userId]); return $row ? (string)$row['role'] : null; }
+function is_admin_user(int $userId): bool { return current_admin_role($userId) !== null; }
+function bootstrap_first_admin(array $user): void { /* Disabled for runtime safety: the first owner must be created by the installer or a trusted CLI/database operation. */ return; }
 function log_admin_action(int $adminUserId, string $action, string $targetType, ?int $targetId = null, string $details = ''): void { try { db_insert('INSERT INTO admin_activity_logs (admin_user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)', 'issis', [$adminUserId, $action, $targetType, $targetId, $details]); } catch (Throwable $e) {} }
-function require_admin(): array { ensure_admin_schema(); ensure_notifications_schema(); ensure_user_admin_columns(); ensure_billing_schema(); $user = current_user(); if (!$user) redirect_to('../'); bootstrap_first_admin($user); if (!is_admin_user((int)$user['id'])) redirect_to('../'); return $user; }
+function require_admin(): array { ensure_admin_schema(); ensure_notifications_schema(); ensure_user_admin_columns(); ensure_billing_schema(); $user = current_user(); if (!$user) redirect_to('../'); if (!is_admin_user((int)$user['id'])) redirect_to('../'); return $user; }
+function require_admin_role(array $allowedRoles): array { $user = require_admin(); $role = current_admin_role((int)$user['id']); if (!$role || !in_array($role, $allowedRoles, true)) { http_response_code(403); exit('Forbidden'); } return $user; }
 function create_notification(int $userId, string $title, string $body, int $adminUserId): int { ensure_notifications_schema(); return db_insert('INSERT INTO notifications (user_id, created_by_user_id, type, title, body, created_at) VALUES (?, ?, "system", ?, ?, NOW())', 'iiss', [$userId, $adminUserId, $title, $body]); }
 function page_num(string $key): int { return max(1, (int)($_GET[$key] ?? 1)); }
 function page_offset(int $page): int { return max(0, ($page - 1) * ADMIN_PAGE_SIZE); }

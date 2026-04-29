@@ -142,7 +142,8 @@ try {
     if ($logApiStats) {
         db_execute('INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, created_at) VALUES (?, ?, ?, ?, ?, NOW())', 'iiisi', [(int)$key['user_id'], (int)($key['team_id'] ?? 0) ?: null, (int)$key['id'], '/api/playground', 502]);
     }
-    playground_json(['ok' => false, 'error' => $e->getMessage()], 502);
+    error_log($e);
+    playground_json(['ok' => false, 'error' => 'AI provider request failed.'], 502);
 }
 
 $usageCounts = rook_ai_usage_from_response($aiResponse);

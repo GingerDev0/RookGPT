@@ -1,6 +1,6 @@
 <?php
 require __DIR__ . '/_bootstrap.php';
-$user = require_admin();
+$user = require_admin_role(['owner']);
 $flash = $_SESSION['admin_flash'] ?? '';
 $newAdminKey = $_SESSION['admin_new_key'] ?? '';
 $error = '';
@@ -35,7 +35,7 @@ if (is_post()) {
             redirect_to('api-keys?' . http_build_query($_GET));
         }
     } catch (Throwable $e) {
-        $error = 'API key action failed: ' . $e->getMessage();
+        $error = 'API key action failed. Please check the server logs.'; error_log($e);
     }
 }
 

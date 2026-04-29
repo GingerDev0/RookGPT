@@ -38,7 +38,7 @@ if (!$activeTeam): ?>
             </div>
             <div class="key-row">
               <code class="key-preview"><?= e($maskedKey) ?></code>
-              <?php if ($plainKey !== ''): ?><button class="btn-ghost copy-team-key" type="button" data-key="<?= e($plainKey) ?>"><i class="fa-regular fa-copy me-2"></i>Copy</button><?php else: ?><button class="btn-ghost" type="button" disabled title="This key was created before encrypted key copying was available. Rotate it to generate a copyable key."><i class="fa-regular fa-copy me-2"></i>Rotate to copy</button><?php endif; ?>
+              <?php if ($canManageTeamApiKeys && $plainKey !== ''): ?><button class="btn-ghost copy-team-key" type="button" data-key="<?= e($plainKey) ?>"><i class="fa-regular fa-copy me-2"></i>Copy</button><?php elseif ($canManageTeamApiKeys): ?><button class="btn-ghost" type="button" disabled title="This key was created before encrypted key copying was available. Rotate it to generate a copyable key."><i class="fa-regular fa-copy me-2"></i>Rotate to copy</button><?php else: ?><button class="btn-ghost" type="button" disabled title="Only members with manage access can copy the full secret."><i class="fa-solid fa-eye-slash me-2"></i>Masked only</button><?php endif; ?>
             </div>
           </div>
         <?php endforeach; ?>

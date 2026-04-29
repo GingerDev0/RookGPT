@@ -228,7 +228,8 @@ try {
             [(int) $key['user_id'], (int) ($key['team_id'] ?? 0) ?: null, (int) $key['id'], '/api', 502]
         );
     }
-    json_response(['ok' => false, 'error' => $e->getMessage()], 502);
+    error_log($e);
+    json_response(['ok' => false, 'error' => 'AI provider request failed.'], 502);
 }
 
 $usageCounts = rook_ai_usage_from_response($aiResponse);

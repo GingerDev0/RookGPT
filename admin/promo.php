@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/_bootstrap.php';
-$user = require_admin();
+$user = require_admin_role(['owner']);
 $messages = [];
 $errors = [];
 

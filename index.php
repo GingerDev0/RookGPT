@@ -2,9 +2,9 @@
 declare(strict_types=1);
 
 date_default_timezone_set('Europe/London');
-session_start();
-require_once __DIR__ . '/lib/install_guard.php';
 require_once __DIR__ . '/lib/security.php';
+rook_hardened_session_start();
+require_once __DIR__ . '/lib/install_guard.php';
 require_once __DIR__ . '/lib/plans.php';
 require_once __DIR__ . '/lib/image_storage.php';
 csrf_bootstrap_web();
@@ -274,9 +274,77 @@ function ensure_security_schema(): void
         if (!db_column_exists('users', 'session_rotated_at')) db()->query("ALTER TABLE users ADD COLUMN session_rotated_at DATETIME NULL AFTER current_session_token");
         if (!db_column_exists('users', 'two_factor_secret')) db()->query("ALTER TABLE users ADD COLUMN two_factor_secret VARCHAR(64) NULL AFTER session_rotated_at");
         if (!db_column_exists('users', 'two_factor_enabled_at')) db()->query("ALTER TABLE users ADD COLUMN two_factor_enabled_at DATETIME NULL AFTER two_factor_secret");
+        db()->query("CREATE TABLE IF NOT EXISTS auth_attempts (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            attempt_key CHAR(64) NOT NULL,
+            action VARCHAR(32) NOT NULL,
+            identifier VARCHAR(190) NOT NULL,
+            ip_address VARCHAR(45) NOT NULL,
+            success TINYINT(1) NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_auth_attempts_key_action_created (attempt_key, action, created_at),
+            KEY idx_auth_attempts_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } catch (Throwable $e) {}
 }
-function clear_local_session(?string $flash = null): void { $_SESSION=[]; session_destroy(); session_start(); if($flash) $_SESSION['flash']=$flash; }
+
+function auth_client_ip(): string
+{
+    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    return mb_substr($ip, 0, 45);
+}
+
+function auth_attempt_key(string $action, string $identifier): string
+{
+    $identifier = mb_strtolower(trim($identifier));
+    return hash('sha256', $action . '|' . auth_client_ip() . '|' . $identifier);
+}
+
+function auth_recent_failures(string $action, string $identifier, int $minutes): int
+{
+    ensure_security_schema();
+    try {
+        $key = auth_attempt_key($action, $identifier);
+        $row = db_fetch_one(
+            'SELECT COUNT(*) AS total FROM auth_attempts WHERE attempt_key = ? AND action = ? AND success = 0 AND created_at >= (NOW() - INTERVAL ? MINUTE)',
+            'ssi',
+            [$key, $action, $minutes]
+        );
+        return (int)($row['total'] ?? 0);
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+function auth_is_limited(string $action, string $identifier, int $maxFailures, int $minutes): bool
+{
+    return auth_recent_failures($action, $identifier, $minutes) >= $maxFailures;
+}
+
+function auth_record_attempt(string $action, string $identifier, bool $success): void
+{
+    ensure_security_schema();
+    try {
+        $identifier = mb_substr(mb_strtolower(trim($identifier)), 0, 190);
+        $key = auth_attempt_key($action, $identifier);
+        db_execute(
+            'INSERT INTO auth_attempts (attempt_key, action, identifier, ip_address, success) VALUES (?, ?, ?, ?, ?)',
+            'ssssi',
+            [$key, $action, $identifier, auth_client_ip(), $success ? 1 : 0]
+        );
+        if ($success) {
+            db_execute('DELETE FROM auth_attempts WHERE attempt_key = ? AND action = ? AND success = 0', 'ss', [$key, $action]);
+        }
+        db_execute('DELETE FROM auth_attempts WHERE created_at < (NOW() - INTERVAL 2 DAY)');
+    } catch (Throwable $e) {}
+}
+
+function auth_rate_limit_message(int $minutes): string
+{
+    return 'Too many failed attempts. Try again in ' . $minutes . ' minutes.';
+}
+function clear_local_session(?string $flash = null): void { rook_safe_restart_session(); if($flash) $_SESSION['flash']=$flash; }
 function create_login_session(int $userId): void { ensure_security_schema(); session_regenerate_id(true); $token=bin2hex(random_bytes(32)); db_execute('UPDATE users SET current_session_token = ?, session_rotated_at = NOW() WHERE id = ?','si',[$token,$userId]); unset($_SESSION['pending_2fa_user_id'],$_SESSION['pending_2fa_started_at'],$_SESSION['pending_2fa_secret']); $_SESSION['user_id']=$userId; $_SESSION['session_token']=$token; }
 function logout_user(): void { if(isset($_SESSION['user_id'],$_SESSION['session_token'])){ try{ db_execute('UPDATE users SET current_session_token = NULL WHERE id = ? AND current_session_token = ?','is',[(int)$_SESSION['user_id'],(string)$_SESSION['session_token']]); }catch(Throwable $e){} } clear_local_session('Logged out cleanly.'); }
 function random_base32_secret(int $length=32): string { $a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $s=''; for($i=0;$i<$length;$i++) $s.=$a[random_int(0,31)]; return $s; }
@@ -846,9 +914,9 @@ function decode_message_images(?string $imagesJson): array
         $name = mb_substr((string) ($image['name'] ?? 'image'), 0, 120);
         $data = (string) ($image['data'] ?? '');
         $path = (string) ($image['path'] ?? '');
-        if ($data === '' && $path !== '') {
-            $full = __DIR__ . '/' . ltrim($path, '/');
-            if (is_file($full) && filesize($full) <= 8 * 1024 * 1024) {
+        if ($data === '') {
+            $full = chat_image_readable_path($image);
+            if ($full !== '' && is_file($full) && filesize($full) <= 8 * 1024 * 1024) {
                 $raw = file_get_contents($full);
                 if ($raw !== false) $data = base64_encode($raw);
             }
@@ -907,8 +975,8 @@ function persist_message_images(int $messageId, int $conversationId, array $imag
         $filename = bin2hex(random_bytes(12)) . '.' . $ext;
         $target = $dir . '/' . $filename;
         if (!move_uploaded_file($tmp, $target) && !copy($tmp, $target)) continue;
-        @chmod($target, 0644);
-        $stored[] = ['name'=>mb_substr((string)($image['name'] ?? 'image'),0,120),'mime'=>$mime,'path'=>'uploads/chat-images/'.$dirRel.'/'.$filename,'size'=>(int)($image['size'] ?? filesize($target))];
+        @chmod($target, 0640);
+        $stored[] = ['name'=>mb_substr((string)($image['name'] ?? 'image'),0,120),'mime'=>$mime,'file'=>$dirRel.'/'.$filename,'size'=>(int)($image['size'] ?? filesize($target))];
     }
     return $stored === [] ? null : json_encode($stored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 }
@@ -1030,7 +1098,9 @@ function stream_ai_response(array $messages, int $conversationId, bool $thinking
         $emit('conversation', $conversationMeta);
     }
 
-    $ch = curl_init(rook_ai_endpoint());
+    $streamEndpoint = rook_ai_endpoint();
+    rook_validate_outbound_http_url($streamEndpoint, rook_ai_is_ollama());
+    $ch = curl_init($streamEndpoint);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_HTTPHEADER => rook_ai_headers(),
@@ -1662,8 +1732,11 @@ if (!$user && is_post() && isset($_POST['auth_action'])) {
 
         if ($action === 'login') {
             $identifier = trim((string) ($_POST['identifier'] ?? ''));
+            $loginWindowMinutes = 15;
             if ($identifier === '' || $password === '') {
                 $authError = 'Enter your username/email and password.';
+            } elseif (auth_is_limited('login', $identifier, 8, $loginWindowMinutes)) {
+                $authError = auth_rate_limit_message($loginWindowMinutes);
             } else {
                 $found = db_fetch_one(
                     'SELECT id, username, email, password_hash, two_factor_secret, two_factor_enabled_at FROM users WHERE email = ? OR username = ? LIMIT 1',
@@ -1672,13 +1745,17 @@ if (!$user && is_post() && isset($_POST['auth_action'])) {
                 );
 
                 if (!$found || !password_verify($password, (string) $found['password_hash'])) {
+                    auth_record_attempt('login', $identifier, false);
                     $authError = 'Login failed. Check your details.';
                 } elseif (!empty($found['two_factor_enabled_at']) && !empty($found['two_factor_secret'])) {
+                    auth_record_attempt('login', $identifier, true);
                     $_SESSION['pending_2fa_user_id'] = (int) $found['id'];
                     $_SESSION['pending_2fa_started_at'] = time();
+                    $_SESSION['pending_2fa_identifier'] = mb_strtolower((string)($found['email'] ?: $identifier));
                     $authError = 'Enter the 6-digit code from your authenticator app.';
                     $action = 'login_2fa';
                 } else {
+                    auth_record_attempt('login', $identifier, true);
                     create_login_session((int) $found['id']);
                     redirect_to('index.php');
                 }
@@ -1688,18 +1765,30 @@ if (!$user && is_post() && isset($_POST['auth_action'])) {
         if ($action === 'login_2fa') {
             $pendingUserId = (int) ($_SESSION['pending_2fa_user_id'] ?? 0);
             $startedAt = (int) ($_SESSION['pending_2fa_started_at'] ?? 0);
+            $twoFactorIdentifier = (string)($_SESSION['pending_2fa_identifier'] ?? ('user:' . $pendingUserId));
             $code = (string) ($_POST['two_factor_code'] ?? '');
+            $twoFactorWindowMinutes = 15;
             if ($pendingUserId < 1 || $startedAt < time() - 600) {
-                unset($_SESSION['pending_2fa_user_id'], $_SESSION['pending_2fa_started_at']);
+                unset($_SESSION['pending_2fa_user_id'], $_SESSION['pending_2fa_started_at'], $_SESSION['pending_2fa_identifier']);
                 $authError = 'Your 2FA login expired. Sign in again.';
+            } elseif (auth_is_limited('login_2fa', $twoFactorIdentifier, 6, $twoFactorWindowMinutes)) {
+                $authError = auth_rate_limit_message($twoFactorWindowMinutes);
+                $action = 'login_2fa';
             } else {
                 $pendingUser = db_fetch_one('SELECT id, two_factor_secret, two_factor_enabled_at FROM users WHERE id = ? LIMIT 1', 'i', [$pendingUserId]);
                 $totpOk = $pendingUser && !empty($pendingUser['two_factor_enabled_at']) && verify_totp((string) $pendingUser['two_factor_secret'], $code);
-                $recoveryOk = $pendingUser && !$totpOk && verify_2fa_recovery_code($pendingUserId, $code);
+                $recoveryLimited = auth_is_limited('recovery_2fa', $twoFactorIdentifier, 3, $twoFactorWindowMinutes);
+                $recoveryOk = $pendingUser && !$totpOk && !$recoveryLimited && verify_2fa_recovery_code($pendingUserId, $code);
                 if (!$totpOk && !$recoveryOk) {
-                    $authError = 'That 2FA or recovery code is not valid.';
+                    auth_record_attempt('login_2fa', $twoFactorIdentifier, false);
+                    if (!$totpOk && !$recoveryLimited && preg_match('/^[A-Z0-9-]{8,}$/i', trim($code))) {
+                        auth_record_attempt('recovery_2fa', $twoFactorIdentifier, false);
+                    }
+                    $authError = $recoveryLimited ? auth_rate_limit_message($twoFactorWindowMinutes) : 'That 2FA or recovery code is not valid.';
                     $action = 'login_2fa';
                 } else {
+                    auth_record_attempt('login_2fa', $twoFactorIdentifier, true);
+                    if ($recoveryOk) auth_record_attempt('recovery_2fa', $twoFactorIdentifier, true);
                     create_login_session($pendingUserId);
                     if ($recoveryOk) $_SESSION['flash'] = 'Recovery code accepted. Generate a fresh set from Security settings soon.';
                     redirect_to('index.php');
@@ -1707,7 +1796,7 @@ if (!$user && is_post() && isset($_POST['auth_action'])) {
             }
         }
     } catch (Throwable $e) {
-        $authError = 'Database/auth error: ' . $e->getMessage();
+        $authError = 'Sign in failed. Please try again.'; error_log($e);
     }
 }
 
@@ -1800,7 +1889,8 @@ if ($user && is_post() && (($_GET['ajax'] ?? '') === 'send')) {
         stream_ai_response($messages, $conversationId, $forceThinking);
     } catch (Throwable $e) {
         header('Content-Type: application/json');
-        echo json_encode(['ok' => false, 'error' => 'Send failed: ' . $e->getMessage()]);
+        error_log($e);
+        echo json_encode(['ok' => false, 'error' => 'Send failed. Please try again.']);
         exit;
     }
 }
@@ -2380,6 +2470,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <style>
     :root {
@@ -3631,8 +3722,8 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
                     <?php $messageImages = $isUserMessage ? decode_message_images((string) ($msg['images_json'] ?? '')) : []; ?>
                     <?php if ($messageImages !== []): ?>
                       <div class="message-images">
-                        <?php foreach ($messageImages as $image): ?>
-                          <img class="message-image-thumb js-chat-image" src="data:<?= e((string) $image['mime']) ?>;base64,<?= e((string) $image['data']) ?>" alt="<?= e((string) ($image['name'] ?? 'Uploaded image')) ?>" loading="lazy" role="button" tabindex="0">
+                        <?php foreach ($messageImages as $i => $image): ?>
+                          <img class="message-image-thumb js-chat-image" src="<?= e(chat_image_url((int)($msg['id'] ?? 0), (int)$i)) ?>" alt="<?= e((string) ($image['name'] ?? 'Uploaded image')) ?>" loading="lazy" role="button" tabindex="0">
                         <?php endforeach; ?>
                       </div>
                     <?php endif; ?>
@@ -4042,11 +4133,31 @@ if ($user && !two_factor_enabled_for_user($user)) {
     });
   }
 
+  function sanitizeRenderedHtml(html) {
+    return window.DOMPurify
+      ? DOMPurify.sanitize(html, {
+          USE_PROFILES: { html: true },
+          FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+          FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
+        })
+      : html;
+  }
+
+  function hardenRenderedLinks(scope) {
+    scope.querySelectorAll('a').forEach((a) => {
+      const href = a.getAttribute('href') || '';
+      if (/^\s*javascript:/i.test(href) || /^\s*data:/i.test(href)) a.removeAttribute('href');
+      a.setAttribute('rel', 'noopener noreferrer nofollow');
+      a.setAttribute('target', '_blank');
+    });
+  }
+
   function renderMarkdown(text) {
     const raw = text || '';
     const html = window.marked ? marked.parse(raw) : raw.replace(/\n/g, '<br>');
     const wrapper = document.createElement('div');
-    wrapper.innerHTML = html;
+    wrapper.innerHTML = sanitizeRenderedHtml(html);
+    hardenRenderedLinks(wrapper);
     if (window.renderMathInElement) {
       try {
         window.renderMathInElement(wrapper, {

@@ -1,7 +1,8 @@
 <?php
 declare(strict_types=1);
 
-session_start();
+require_once dirname(__DIR__) . '/lib/security.php';
+rook_hardened_session_start();
 date_default_timezone_set('Europe/London');
 
 $root = dirname(__DIR__);

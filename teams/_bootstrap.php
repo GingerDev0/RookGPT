@@ -2,9 +2,9 @@
 declare(strict_types=1);
 
 date_default_timezone_set('Europe/London');
-session_start();
-require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/security.php';
+rook_hardened_session_start();
+require_once __DIR__ . '/../lib/install_guard.php';
 require_once __DIR__ . '/../lib/plans.php';
 csrf_bootstrap_web();
 
@@ -107,7 +107,7 @@ function ensure_auth_security_schema(): void
         if (!db_column_exists('users', 'two_factor_enabled_at')) db()->query("ALTER TABLE users ADD COLUMN two_factor_enabled_at DATETIME NULL AFTER two_factor_secret");
     } catch (Throwable $e) {}
 }
-function clear_local_session(?string $flash = null): void { $_SESSION=[]; session_destroy(); session_start(); if($flash) $_SESSION['flash']=$flash; }
+function clear_local_session(?string $flash = null): void { rook_safe_restart_session(); if($flash) $_SESSION['flash']=$flash; }
 function two_factor_enabled_for_user(array $user): bool { return !empty($user['two_factor_enabled_at']) && !empty($user['two_factor_secret']); }
 function teams_require_2fa(): bool { return defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true; }
 function ensure_team_schema(): void
@@ -1151,11 +1151,11 @@ ensure_team_schema();
 ensure_team_chat_schema();
 ensure_notifications_schema();
 $user = current_user();
-if (!$user) redirect_to('index.php');
+if (!$user) redirect_to("/");
 
 if (!rook_plan_supports((string) ($user['plan'] ?? 'free'), 'team_access')) {
     $_SESSION['flash'] = 'Teams are not available on your current plan.';
-    redirect_to('index.php');
+    redirect_to("/");
 }
 if (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
     $_SESSION['flash'] = 'Enable 2FA in Account settings before using Teams.';
@@ -1524,6 +1524,7 @@ function render_team_header(string $activePage, string $title, string $subtitle)
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <link rel="stylesheet" href="/rook.css">
   <style>

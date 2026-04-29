@@ -409,6 +409,21 @@ const bootTeamChat = () => {
     return raw.replace(/\s+/g, ' ').trim().slice(0, 180);
   };
   const boldMentions = (text) => String(text || '').replace(/(^|\s)(@[\p{L}\p{N}_.-]+)/gu, '$1**$2**');
+  const sanitizeRenderedHtml = (html) => window.DOMPurify
+    ? DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true },
+        FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+        FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
+      })
+    : html;
+  const hardenRenderedLinks = (scope) => {
+    scope.querySelectorAll('a').forEach((a) => {
+      const href = a.getAttribute('href') || '';
+      if (/^\s*javascript:/i.test(href) || /^\s*data:/i.test(href)) a.removeAttribute('href');
+      a.setAttribute('rel', 'noopener noreferrer nofollow');
+      a.setAttribute('target', '_blank');
+    });
+  };
   const renderMarkdown = (text) => {
     const reply = parseReplyToken(text);
     const body = reply ? reply.body : String(text || '');
@@ -426,7 +441,8 @@ const bootTeamChat = () => {
       wrapper.append(quote);
     }
     const bodyWrapper = document.createElement('div');
-    bodyWrapper.innerHTML = window.marked ? marked.parse(raw) : raw.replace(/\n/g, '<br>');
+    bodyWrapper.innerHTML = sanitizeRenderedHtml(window.marked ? marked.parse(raw) : raw.replace(/\n/g, '<br>'));
+    hardenRenderedLinks(bodyWrapper);
     wrapper.append(...Array.from(bodyWrapper.childNodes));
     const renderMath = () => {
       if (!window.renderMathInElement) return;

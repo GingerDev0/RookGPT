@@ -1,6 +1,6 @@
 <?php
 require __DIR__ . '/_bootstrap.php';
-$user = require_admin();
+$user = require_admin_role(['owner']);
 $flash = $_SESSION['admin_flash'] ?? '';
 $error = '';
 unset($_SESSION['admin_flash']);

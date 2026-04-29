@@ -12,5 +12,6 @@ try {
     echo json_encode(['ok'=>true, 'models'=>$models], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(400);
-    echo json_encode(['ok'=>false, 'error'=>$e->getMessage()], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    error_log($e);
+    echo json_encode(['ok'=>false, 'error'=>'Could not fetch models. Check the provider endpoint and key.'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 }

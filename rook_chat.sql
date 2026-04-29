@@ -22,6 +22,20 @@ CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+
+CREATE TABLE IF NOT EXISTS `auth_attempts` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `attempt_key` CHAR(64) NOT NULL,
+  `action` VARCHAR(32) NOT NULL,
+  `identifier` VARCHAR(190) NOT NULL,
+  `ip_address` VARCHAR(45) NOT NULL,
+  `success` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_auth_attempts_key_action_created` (`attempt_key`, `action`, `created_at`),
+  KEY `idx_auth_attempts_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `admins` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id` INT UNSIGNED NOT NULL,
