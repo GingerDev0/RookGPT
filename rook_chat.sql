@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS `api_keys` (
   `key_hash` CHAR(64) NOT NULL,
   `key_prefix` VARCHAR(32) NULL,
   `key_suffix` VARCHAR(16) NULL,
+  `secret_cipher` MEDIUMTEXT NULL,
   `last_used_at` TIMESTAMP NULL DEFAULT NULL,
   `revoked_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -229,6 +230,50 @@ CREATE TABLE IF NOT EXISTS `team_members` (
   CONSTRAINT `fk_team_members_user`
     FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
     ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `team_chat_messages` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `team_id` INT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `content` MEDIUMTEXT NOT NULL,
+  `encrypted` TINYINT(1) NOT NULL DEFAULT 1,
+  `is_ai` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_name` VARCHAR(80) NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME NULL,
+  `deleted_by_user_id` INT UNSIGNED NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_team_chat_team_id_id` (`team_id`, `id`),
+  KEY `idx_team_chat_user_id` (`user_id`),
+  KEY `idx_team_chat_created_at` (`created_at`),
+  KEY `idx_team_chat_updated_at` (`updated_at`),
+  KEY `idx_team_chat_deleted_at` (`deleted_at`),
+  CONSTRAINT `fk_team_chat_team`
+    FOREIGN KEY (`team_id`) REFERENCES `teams` (`id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_team_chat_user`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `team_chat_delete_events` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `team_id` INT UNSIGNED NOT NULL,
+  `actor_user_id` INT UNSIGNED NULL,
+  `event_type` VARCHAR(16) NOT NULL DEFAULT 'delete',
+  `message_id` BIGINT UNSIGNED NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_team_chat_delete_events_team_id_id` (`team_id`, `id`),
+  KEY `idx_team_chat_delete_events_created_at` (`created_at`),
+  CONSTRAINT `fk_team_chat_delete_events_team`
+    FOREIGN KEY (`team_id`) REFERENCES `teams` (`id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `fk_team_chat_delete_events_actor`
+    FOREIGN KEY (`actor_user_id`) REFERENCES `users` (`id`)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `team_changes` (

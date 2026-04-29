@@ -1,0 +1,46 @@
+RewriteEngine On
+
+# Preserve Authorization header for PHP
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+
+DirectoryIndex index.php
+
+# Auto-open installer before configuration exists.
+RewriteCond %{REQUEST_URI} !^/install/? [NC]
+RewriteCond %{DOCUMENT_ROOT}/install -d
+RewriteCond %{DOCUMENT_ROOT}/config/app.php !-f
+RewriteRule ^$ /install/ [R=302,L]
+
+# Let the exact /api URL be the JSON endpoint even though /api/ is a dashboard directory.
+# Without this, Apache may append the trailing slash and send /api to /api/.
+DirectorySlash Off
+
+# Redirect /index or /index.php to / for browser navigation only.
+RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+RewriteRule ^index(?:\.php)?$ / [R=301,L,NC]
+
+# Public API endpoint: /api. Keep /api/ as the dashboard/docs directory.
+RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+RewriteCond %{THE_REQUEST} \s/+api\.php[\s?] [NC]
+RewriteRule ^api\.php$ /api [R=301,L]
+RewriteRule ^api$ api.php [L,QSA]
+RewriteRule ^api/$ api/index.php [L,QSA]
+
+RewriteRule ^api-keys(?:\.php)?$ /api/ [R=301,L,NC]
+RewriteRule ^admin(?:\.php)?$ /admin/ [R=301,L,NC]
+RewriteRule ^teams(?:\.php)?$ /teams/ [R=301,L,NC]
+RewriteRule ^share(?:\.php)?$ share.php [L]
+
+# Redirect explicit .php requests to extensionless version for browser navigation only.
+# Do not redirect POST/PUT/PATCH/DELETE, or AJAX/form submissions can be converted to GET.
+RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+RewriteCond %{THE_REQUEST} \s/+(.+?)\.php[\s?] [NC]
+RewriteCond %{REQUEST_URI} !^/api\.php$ [NC]
+RewriteRule ^(.+)\.php$ /$1 [R=301,L]
+
+# Serve extensionless URLs from matching .php files
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{DOCUMENT_ROOT}/$1.php -f
+RewriteRule ^(.+?)/?$ $1.php [L]

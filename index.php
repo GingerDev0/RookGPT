@@ -283,6 +283,7 @@ function base32_decode_secret(string $b): string { $a='ABCDEFGHIJKLMNOPQRSTUVWXY
 function totp_code(string $secret, ?int $slice=null): string { $slice=$slice??(int)floor(time()/30); $key=base32_decode_secret($secret); $time=pack('N*',0).pack('N*',$slice); $hash=hash_hmac('sha1',$time,$key,true); $o=ord(substr($hash,-1))&15; $v=((ord($hash[$o])&127)<<24)|((ord($hash[$o+1])&255)<<16)|((ord($hash[$o+2])&255)<<8)|(ord($hash[$o+3])&255); return str_pad((string)($v%1000000),6,'0',STR_PAD_LEFT); }
 function verify_totp(string $secret,string $code,int $window=1): bool { $code=preg_replace('/\D+/','',$code)??''; if(strlen($code)!==6||$secret==='')return false; $slice=(int)floor(time()/30); for($i=-$window;$i<=$window;$i++){ if(hash_equals(totp_code($secret,$slice+$i),$code)) return true; } return false; }
 function two_factor_enabled_for_user(array $user): bool { return !empty($user['two_factor_enabled_at']) && !empty($user['two_factor_secret']); }
+function teams_require_2fa(): bool { return defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true; }
 
 function ensure_2fa_recovery_schema(): void
 {
@@ -1907,7 +1908,7 @@ if ($user && is_post()) {
         }
 
         if (isset($_POST['accept_team_invite'])) {
-            if (!two_factor_enabled_for_user($user)) {
+            if (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
                 $_SESSION['flash'] = 'Enable 2FA in Account settings before joining a team.';
             } else {
                 $_SESSION['flash'] = accept_team_invite((int) ($_POST['invite_id'] ?? 0), (int) $user['id']);
@@ -1923,7 +1924,7 @@ if ($user && is_post()) {
         if (isset($_POST['create_team'])) {
             if ((string) ($user['plan'] ?? 'free') !== 'business') {
                 $_SESSION['flash'] = 'Teams are only available on the Business plan.';
-            } elseif (!two_factor_enabled_for_user($user)) {
+            } elseif (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
                 $_SESSION['flash'] = 'Enable 2FA in Account settings before creating a team.';
             } else {
                 $existingTeam = fetch_owned_team((int) $user['id']);
@@ -2044,7 +2045,7 @@ if ($user && is_post()) {
                 $_SESSION['flash'] = 'Current password is incorrect.';
             } elseif (!verify_totp((string) ($currentUserRow['two_factor_secret'] ?? ''), $code)) {
                 $_SESSION['flash'] = 'That 2FA code is not valid.';
-            } elseif ((defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true) && (fetch_owned_team((int) $user['id']) || fetch_user_team_membership((int) $user['id']))) {
+            } elseif (teams_require_2fa() && (fetch_owned_team((int) $user['id']) || fetch_user_team_membership((int) $user['id']))) {
                 $_SESSION['flash'] = 'Leave or delete your team before disabling 2FA.';
             } else {
                 db_execute('UPDATE users SET two_factor_secret = NULL, two_factor_enabled_at = NULL WHERE id = ?', 'i', [(int) $user['id']]);
@@ -2178,7 +2179,7 @@ if ($user && is_post()) {
             $conversation = fetch_conversation($conversationId, (int) $user['id']);
             if ((string) ($user['plan'] ?? 'free') !== 'business') {
                 $_SESSION['flash'] = 'Team sharing is only available on the Business plan.';
-            } elseif (!two_factor_enabled_for_user($user)) {
+            } elseif (teams_require_2fa() && !two_factor_enabled_for_user($user)) {
                 $_SESSION['flash'] = 'Enable 2FA in Account settings before using team sharing.';
             } elseif ($conversation && enable_team_conversation_share($conversationId, (int) $user['id'])) {
                 $_SESSION['flash'] = 'Conversation shared with your team.';
@@ -2824,7 +2825,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
     .message-images { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; position: relative; z-index: 1; }
     .message-image-thumb { width: 132px; max-width: 46%; aspect-ratio: 1.25; object-fit: cover; border-radius: 14px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); cursor: zoom-in; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
     .message-image-thumb:hover { transform: translateY(-1px); border-color: rgba(124,156,255,0.48); box-shadow: 0 14px 34px rgba(0,0,0,0.25); }
-    .image-gallery-modal .modal-content { background: rgba(8, 12, 22, 0.98); border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; color: var(--text); overflow: hidden; box-shadow: 0 28px 90px rgba(0,0,0,0.55); }
+    .image-gallery-modal .modal-content { background: rgba(8, 12, 22, 0.98); border: 1px solid rgba(255,255,255,0.12); border-radius: 0; color: var(--text); overflow: hidden; box-shadow: 0 28px 90px rgba(0,0,0,0.55); }
     .image-gallery-modal .modal-header, .image-gallery-modal .modal-footer { border-color: rgba(255,255,255,0.1); }
     .image-gallery-stage { min-height: min(72vh, 760px); display: grid; place-items: center; background: radial-gradient(circle at top, rgba(124,156,255,0.12), rgba(0,0,0,0.18)); padding: 18px; }
     .image-gallery-stage img { max-width: 100%; max-height: 72vh; border-radius: 18px; object-fit: contain; box-shadow: 0 20px 70px rgba(0,0,0,0.42); }
@@ -3710,7 +3711,7 @@ $emptyChatSuggestions = get_empty_chat_suggestions(3);
 <?php
 $twoFactorSetupSecret = '';
 $twoFactorSetupUri = '';
-$teamsRequire2faForUi = defined('TEAMS_REQUIRE_2FA') ? (bool) TEAMS_REQUIRE_2FA : true;
+$teamsRequire2faForUi = teams_require_2fa();
 if ($user && !two_factor_enabled_for_user($user)) {
     if (empty($_SESSION['pending_2fa_secret'])) $_SESSION['pending_2fa_secret'] = random_base32_secret();
     $twoFactorSetupSecret = (string) $_SESSION['pending_2fa_secret'];
@@ -3758,7 +3759,7 @@ if ($user && !two_factor_enabled_for_user($user)) {
               <div class="upgrade-card" style="height:auto;margin-top:14px;"><div class="upgrade-card-body"><div class="sidebar-section-label">Two-factor authentication</div><div class="upgrade-card-title" style="padding-right:0;">Enabled</div><p><?= $teamsRequire2faForUi ? 'Teams access is unlocked. To disable 2FA, first leave or delete any team connected to this account.' : '2FA is enabled for your account. Teams access does not currently require 2FA, but keeping it on is recommended.' ?></p><form method="post"><div class="field"><label for="two_factor_disable_password">Current password</label><input id="two_factor_disable_password" name="two_factor_disable_password" type="password" required></div><div class="field"><label for="two_factor_disable_code">Authenticator code</label><input id="two_factor_disable_code" name="two_factor_disable_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required></div><button type="submit" name="disable_2fa" value="1" class="ghost-btn"><i class="fa-solid fa-lock-open"></i><span>Disable 2FA</span></button></form><?php $newRecoveryCodes = $_SESSION['new_2fa_recovery_codes'] ?? []; unset($_SESSION['new_2fa_recovery_codes']); ?><?php if (is_array($newRecoveryCodes) && $newRecoveryCodes !== []): ?><div class="field" style="margin-top:14px;"><label>New recovery codes — save these now</label><textarea readonly rows="6" onclick="this.select()" style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;"><?= e(implode("
 ", array_map('strval', $newRecoveryCodes))) ?></textarea></div><?php endif; ?><form method="post" style="margin-top:14px;"><div class="field"><label>Recovery codes left</label><input type="text" readonly value="<?= (int) unused_2fa_recovery_count((int) $user['id']) ?> unused codes"></div><div class="field"><label for="two_factor_recovery_password">Current password</label><input id="two_factor_recovery_password" name="two_factor_recovery_password" type="password" required></div><div class="field"><label for="two_factor_recovery_code">Authenticator code</label><input id="two_factor_recovery_code" name="two_factor_recovery_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required></div><button type="submit" name="regenerate_2fa_recovery_codes" value="1" class="new-chat-btn"><i class="fa-solid fa-rotate"></i><span>Regenerate recovery codes</span></button></form></div></div>
             <?php else: ?>
-              <div class="upgrade-card" style="height:auto;margin-top:14px;"><div class="upgrade-card-body"><div class="sidebar-section-label">Two-factor authentication</div><div class="upgrade-card-title" style="padding-right:0;"><?= $teamsRequire2faForUi ? 'Required for Teams' : 'Recommended' ?></div><p>Scan the QR code with Google Authenticator, 1Password, Authy, Microsoft Authenticator, or any TOTP app. Then enter the 6-digit code to enable Teams.</p><div class="two-factor-qr-wrap" style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;margin:12px 0 16px;"><div id="twoFactorQr" class="two-factor-qr" data-otpauth="<?= e($twoFactorSetupUri) ?>" aria-label="2FA setup QR code" style="width:180px;height:180px;display:grid;place-items:center;background:#fff;border-radius:18px;padding:12px;box-shadow:0 18px 45px rgba(0,0,0,.18);"><span style="color:#334155;font-size:.85rem;text-align:center;line-height:1.25;">QR loading…</span></div><div style="flex:1;min-width:220px;"><div class="field"><label>Setup key</label><input type="text" readonly value="<?= e($twoFactorSetupSecret) ?>" onclick="this.select()"></div><p style="margin:8px 0 0;color:var(--muted);font-size:.9rem;">If the QR code does not appear, use the setup key manually in your authenticator app.</p></div></div><details style="margin:10px 0 14px;"><summary>Advanced: otpauth URI</summary><div class="field" style="margin-top:10px;"><input type="text" readonly value="<?= e($twoFactorSetupUri) ?>" onclick="this.select()"></div></details><form method="post"><div class="field"><label for="two_factor_setup_code">Authenticator code</label><input id="two_factor_setup_code" name="two_factor_setup_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required></div><button type="submit" name="enable_2fa" value="1" class="new-chat-btn"><i class="fa-solid fa-shield-halved"></i><span>Enable 2FA</span></button></form></div></div>
+              <div class="upgrade-card" style="height:auto;margin-top:14px;"><div class="upgrade-card-body"><div class="sidebar-section-label">Two-factor authentication</div><div class="upgrade-card-title" style="padding-right:0;"><?= $teamsRequire2faForUi ? 'Required for Teams' : 'Recommended' ?></div><p><?= $teamsRequire2faForUi ? 'Scan the QR code with Google Authenticator, 1Password, Authy, Microsoft Authenticator, or any TOTP app. Then enter the 6-digit code to enable Teams.' : 'Scan the QR code with Google Authenticator, 1Password, Authy, Microsoft Authenticator, or any TOTP app. Then enter the 6-digit code to enable 2FA.' ?></p><div class="two-factor-qr-wrap" style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;margin:12px 0 16px;"><div id="twoFactorQr" class="two-factor-qr" data-otpauth="<?= e($twoFactorSetupUri) ?>" aria-label="2FA setup QR code" style="width:180px;height:180px;display:grid;place-items:center;background:#fff;border-radius:0;padding:12px;box-shadow:0 18px 45px rgba(0,0,0,.18);"><span style="color:#334155;font-size:.85rem;text-align:center;line-height:1.25;">QR loading…</span></div><div style="flex:1;min-width:220px;"><div class="field"><label>Setup key</label><input type="text" readonly value="<?= e($twoFactorSetupSecret) ?>" onclick="this.select()"></div><p style="margin:8px 0 0;color:var(--muted);font-size:.9rem;">If the QR code does not appear, use the setup key manually in your authenticator app.</p></div></div><details style="margin:10px 0 14px;"><summary>Advanced: otpauth URI</summary><div class="field" style="margin-top:10px;"><input type="text" readonly value="<?= e($twoFactorSetupUri) ?>" onclick="this.select()"></div></details><form method="post"><div class="field"><label for="two_factor_setup_code">Authenticator code</label><input id="two_factor_setup_code" name="two_factor_setup_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required></div><button type="submit" name="enable_2fa" value="1" class="new-chat-btn"><i class="fa-solid fa-shield-halved"></i><span>Enable 2FA</span></button></form></div></div>
             <?php endif; ?>
           </div>          <div class="tab-pane fade" id="password-tab-pane" role="tabpanel" aria-labelledby="password-tab" tabindex="0">
             <form method="post"><div class="field"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" required></div><div class="field"><label for="new_password">New password</label><input id="new_password" name="new_password" type="password" minlength="8" required></div><div class="field"><label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" minlength="8" required></div><button type="submit" name="reset_password" value="1" class="new-chat-btn"><i class="fa-solid fa-key"></i><span>Update password</span></button></form>
@@ -4970,8 +4971,23 @@ if ($user && !two_factor_enabled_for_user($user)) {
   const expiringPlanKey = <?= json_encode((string) ($user['plan'] ?? 'free'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
   const expiringPlanUntil = <?= json_encode((string) $planExpiryLabel, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
 
+  function flashModalTitle(message) {
+    const text = String(message || '').toLowerCase();
+    if (text.includes('api key')) return 'API key updated';
+    if (text.includes('2fa') || text.includes('two-factor') || text.includes('recovery code')) return 'Security settings updated';
+    if (text.includes('password')) return 'Password updated';
+    if (text.includes('account settings') || text.includes('username') || text.includes('email')) return 'Account settings updated';
+    if (text.includes('conversation')) return 'Conversation updated';
+    if (text.includes('team invite') || text.includes('team member') || text.includes('team ')) return 'Team updated';
+    if (text.includes('notification')) return 'Notifications updated';
+    if (text.includes('thinking')) return 'Thinking setting updated';
+    if (text.includes('personality') || text.includes('tone') || text.includes('style')) return 'AI personality updated';
+    if (text.includes('plan') || text.includes('upgrade')) return 'Plan updated';
+    return 'Action complete';
+  }
+
   if (initialFlashMessage) {
-    openAppModal({ title: 'Done', message: initialFlashMessage, hideCancel: true, confirmText: 'Close' });
+    openAppModal({ title: flashModalTitle(initialFlashMessage), message: initialFlashMessage, hideCancel: true, confirmText: 'Close' });
   }
 
   if (initialAppError) {

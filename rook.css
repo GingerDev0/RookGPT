@@ -840,3 +840,31 @@ body.rook-body.rook-app .page-hero{background:linear-gradient(180deg,rgba(18,26,
 body.rook-body.rook-app .ghost-btn, body.rook-body.rook-app .btn-ghost, body.rook-body.rook-app .navbar-chip{display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:11px 13px;color:var(--rook-text);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);text-decoration:none;font-weight:800}
 body.rook-body.rook-app .new-chat-btn, body.rook-body.rook-app .btn-rook, body.rook-body.rook-app .action-btn{background:linear-gradient(135deg,var(--rook-accent),#8b7cff 45%,var(--rook-accent-2));color:white;border:0;font-weight:900}
 @media(max-width:920px){body.rook-body.rook-app .app{display:block;height:auto;min-height:100vh;overflow:visible}body.rook-body.rook-app .main-panel,body.rook-body.rook-app .main{height:auto;min-height:100vh;overflow:visible}body.rook-body.rook-app .sidebar{display:none!important}body.rook-body.rook-app .page-content,body.rook-body.rook-app .content,body.rook-body.rook-app .admin-main{overflow:visible;padding:16px}body.rook-body.rook-app .topbar{position:relative;align-items:flex-start;flex-direction:column}}
+
+/* Square modal system: keep every modal and every element inside modals sharp-edged. */
+body.rook-body .modal,
+body.rook-body .modal *,
+body.rook-body .modal-dialog,
+body.rook-body .modal-content,
+body.rook-body .modal-header,
+body.rook-body .modal-body,
+body.rook-body .modal-footer,
+body.rook-body .modal .btn,
+body.rook-body .modal button,
+body.rook-body .modal input,
+body.rook-body .modal textarea,
+body.rook-body .modal select,
+body.rook-body .modal .form-control,
+body.rook-body .modal .form-select,
+body.rook-body .modal .btn-close,
+body.rook-body .modal .pill,
+body.rook-body .modal .badge,
+body.rook-body .modal .card,
+body.rook-body .modal .alert,
+body.rook-body .modal img,
+body.rook-body .app-modal,
+body.rook-body .app-modal *,
+body.rook-body .confirm-modal,
+body.rook-body .confirm-modal * {
+  border-radius: 0 !important;
+}
