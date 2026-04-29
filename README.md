@@ -2,7 +2,7 @@
 
 # ♜ RookGPT
 
-### A self-hosted AI chat workspace for teams, APIs, admin control, 2FA, and multiple AI providers.
+### A self-hosted AI workspace for teams, real-time chat, APIs, admin control, 2FA, and multiple AI providers.
 
 ![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-Database-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
@@ -15,6 +15,8 @@
 ![API](https://img.shields.io/badge/API-ready-purple?style=flat-square)
 ![2FA](https://img.shields.io/badge/2FA-supported-orange?style=flat-square)
 ![Teams](https://img.shields.io/badge/teams-supported-success?style=flat-square)
+![SSE](https://img.shields.io/badge/SSE-real--time-20D9FF?style=flat-square)
+![Encrypted Chat](https://img.shields.io/badge/team%20chat-encrypted-7C5CFF?style=flat-square)
 
 </div>
 
@@ -22,9 +24,11 @@
 
 ## ✨ Overview
 
-**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, API keys, 2FA-protected team access, admin controls, and a simple authenticated chat API.
+**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL/MariaDB. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, encrypted real-time team chat, API keys, 2FA-protected team access, admin controls, and an authenticated JSON chat API.
 
-The app can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
+RookGPT can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
+
+It also includes a Teams area where members can chat in real time, mention each other, reply to messages, call an AI assistant with `@AI`, and keep team chat messages encrypted at rest.
 
 ## 🚀 Highlights
 
@@ -36,6 +40,13 @@ The app can run against a local Ollama model or a hosted AI provider such as **O
 - 🔐 Single-session enforcement to prevent the same user account being active across multiple devices at once
 - 🛡️ Two-factor authentication using authenticator apps and recovery codes
 - 👥 Teams area with members, conversations, activity, settings, and team API keys
+- 💬 Real-time team chat powered by Server-Sent Events
+- 🔒 Encrypted-at-rest team chat messages using AES-256-GCM
+- 🤖 `@AI` team chat assistant using the team API key named `ChatBot`
+- ⚡ Streaming `@AI` replies that appear live as they are generated
+- 🧩 `@` mention picker for `@AI` and team members
+- 🧵 Message replies with quoted previews and click-to-jump navigation
+- 🗑️ Team owner message deletion and full chat clearing
 - 🔑 Team API access gated behind 2FA
 - 🧾 User API key management with masked key previews
 - 🌐 Public JSON chat endpoint at `/api`
@@ -54,6 +65,10 @@ The app can run against a local Ollama model or a hosted AI provider such as **O
 | Server | Apache with `mod_rewrite` |
 | UI | Bootstrap, Font Awesome |
 | Charts | Chart.js |
+| Realtime | Server-Sent Events |
+| Markdown | Marked.js |
+| Code Highlighting | Highlight.js |
+| Math Rendering | KaTeX |
 | AI | Ollama or hosted AI provider |
 
 ## ✅ Requirements
@@ -130,6 +145,8 @@ defined('AI_BASE_URL') || define('AI_BASE_URL', 'http://127.0.0.1:11434/api/chat
 defined('AI_MODEL') || define('AI_MODEL', 'gemma4:e4b');
 defined('AI_API_KEY') || define('AI_API_KEY', '');
 
+defined('TEAM_CHAT_ENCRYPTION_KEY') || define('TEAM_CHAT_ENCRYPTION_KEY', 'change-this-to-a-long-random-secret');
+
 defined('STRIPE_SECRET_KEY') || define('STRIPE_SECRET_KEY', '');
 defined('APP_NAME') || define('APP_NAME', 'RookGPT');
 defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');
@@ -140,6 +157,9 @@ Then import the schema:
 ```bash
 mysql -u your_user -p rook_chat < rook_chat.sql
 ```
+
+> [!WARNING]
+> Keep `TEAM_CHAT_ENCRYPTION_KEY` stable after installation. Changing it will prevent existing encrypted team chat messages from being decrypted.
 
 ## 🤖 Supported AI Providers
 
@@ -160,6 +180,76 @@ RookGPT includes provider presets for:
 
 The installer and admin settings page can fetch available models from the selected provider when the endpoint and API key are valid.
 
+## 👥 Teams
+
+The Teams area provides private team workspaces with member management, team API keys, and real-time collaboration.
+
+Team features include:
+
+- Team dashboard
+- Team member management
+- Team conversations
+- Team activity
+- Team settings
+- Team API keys
+- Encrypted real-time team chat
+- 2FA requirement for team access
+
+## 💬 Real-Time Team Chat
+
+RookGPT includes a ChatGPT-style team chat interface using Server-Sent Events.
+
+Team chat supports:
+
+- Real-time message delivery
+- Markdown rendering
+- Code highlighting
+- KaTeX math rendering
+- Custom scrollbars
+- `@` mention picker
+- Bold `@mentions`
+- Message replies
+- Clickable reply quotes that jump to the original message
+- Team owner delete controls
+- Team owner full chat clearing
+- Styled confirmation modals instead of browser alerts
+
+### Team Chat Encryption
+
+Team chat messages are encrypted at rest with AES-256-GCM before being stored in the database.
+
+Only authorised team members can view decrypted messages through the app after passing the existing team access checks.
+
+### `@AI` in Team Chat
+
+Team members can call the assistant directly inside team chat:
+
+```text
+@AI summarise the last few messages
+```
+
+`@AI` uses the team API key named:
+
+```text
+ChatBot
+```
+
+If no `ChatBot` key exists, the chat displays a setup message instructing the team owner to create one.
+
+The assistant can reference the last 100 visible team chat messages, including speaker names, so it can answer in context:
+
+```text
+GingerDev: @AI what's my name?
+AI: You are GingerDev
+```
+
+```text
+GingerDev0: @AI what's my name?
+AI: You are GingerDev0
+```
+
+AI replies are streamed into the chat live and saved back as encrypted team chat messages.
+
 ## 🧭 Routes
 
 | Route | Purpose |
@@ -174,6 +264,11 @@ The installer and admin settings page can fetch available models from the select
 | `/api/keys` | API key management |
 | `/api/usage` | API usage analytics |
 | `/teams/` | Teams dashboard |
+| `/teams/chat` | Real-time encrypted team chat |
+| `/teams/chat-events` | Team chat SSE event stream |
+| `/teams/chat-send` | Team chat send endpoint |
+| `/teams/chat-ai-stream` | Streaming `@AI` endpoint |
+| `/teams/chat-manage` | Team owner chat moderation endpoint |
 | `/upgrade` | Upgrade/cart page |
 | `/share` | Shared conversation route |
 | `/terms` | Terms of Service |
@@ -201,6 +296,7 @@ curl -X POST https://your-domain.com/api \
     ],
     "temperature": 0.8,
     "top_p": 0.95,
+    "top_k": 64,
     "think": false
   }'
 ```
@@ -221,6 +317,27 @@ curl -X POST https://your-domain.com/api \
 }
 ```
 
+### Streaming Request
+
+Some compatible endpoints can stream output:
+
+```json
+{
+  "system_prompt": "",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a short welcome message."
+    }
+  ],
+  "streaming": true,
+  "think": false,
+  "temperature": 1,
+  "top_p": 0.95,
+  "top_k": 64
+}
+```
+
 ### Request Body
 
 | Field | Type | Required | Description |
@@ -229,8 +346,9 @@ curl -X POST https://your-domain.com/api \
 | `system_prompt` | string | No | Extra lower-priority instructions for the assistant |
 | `temperature` | number | No | Defaults to `1.0`; must be between `0` and `2` |
 | `top_p` | number | No | Defaults to `0.95`; must be between `0` and `1` |
-| `top_k` | integer | No | Ollama option; defaults to `64` |
+| `top_k` | integer | No | Ollama/API option; defaults to `64` |
 | `think` | boolean | No | Enables model thinking output when supported |
+| `streaming` | boolean | No | Requests streamed output when supported |
 
 ## 💼 Plans and API Limits
 
@@ -259,7 +377,7 @@ api/                   API dashboard, docs, keys, playground, usage
 config/                App configuration
 install/               Web installer
 lib/                   Shared provider, security, image, and install helpers
-teams/                 Team workspace pages
+teams/                 Team workspace pages, chat, SSE, and moderation endpoints
 api.php                Public JSON API endpoint
 index.php              Main chat application
 rook.css               Shared app styling
@@ -276,9 +394,11 @@ privacy.php            Privacy page
 - Use HTTPS in production.
 - Use strong admin passwords.
 - Enable 2FA before using team features.
+- Keep `TEAM_CHAT_ENCRYPTION_KEY` secret and stable.
 - Keep PHP, MySQL/MariaDB, Apache, and dependencies updated.
 - Ensure uploads are served safely and only expected image MIME types are accepted.
 - Restrict access to `/install/` after setup.
+- Do not commit API keys or encryption keys.
 
 ## 🧪 Development Notes
 
@@ -287,6 +407,9 @@ privacy.php            Privacy page
 - `/api` is intentionally the JSON endpoint, while `/api/` is the web dashboard.
 - Explicit `.php` browser requests are redirected to extensionless URLs for cleaner routes.
 - Provider model fetching is handled in `lib/ai_providers.php`.
+- Team chat has two render paths that must stay in sync:
+  - PHP initial render
+  - JavaScript/SSE live render
 
 ## 🤝 Contributing
 
@@ -296,12 +419,15 @@ Before opening a pull request:
 
 1. Test the installer.
 2. Test login, registration, and chat.
-3. Check that `/api` still requires a valid bearer token.
-4. Make sure no secrets are committed.
+3. Test team chat, SSE updates, replies, deletes, and `@AI`.
+4. Check that `/api` still requires a valid bearer token.
+5. Make sure no secrets are committed.
 
 ## 📜 License
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+
+This project is released under the MIT License.
 
 ---
 
