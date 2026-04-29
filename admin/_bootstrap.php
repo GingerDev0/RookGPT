@@ -181,5 +181,43 @@ function admin_header(string $title, array $user, string $active = ''): void {
     <div class="page-content admin-main">
       <nav class="team-subnav" aria-label="Admin sections"><?php foreach ($tabs as [$href, $key, $icon, $label]): ?><a class="<?= $active === $key ? 'active' : '' ?>" href="<?= e($href) ?>"><i class="fa-solid <?= e($icon) ?>"></i><?= e($label) ?></a><?php endforeach; ?></nav>
 <?php }
-function admin_footer(): void { ?></div></main></div><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script></body></html><?php }
+function admin_footer(): void { ?></div></main></div>
+<div class="modal fade" id="adminConfirmModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content" style="background:#0b1424;border:1px solid rgba(255,255,255,.12);color:#eaf0ff;border-radius:0;"><div class="modal-header" style="border-color:rgba(255,255,255,.08);"><h5 class="modal-title" id="adminConfirmTitle">Confirm action</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body" id="adminConfirmBody"></div><div class="modal-footer" style="border-color:rgba(255,255,255,.08);"><button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cancel</button><button type="button" class="danger-btn btn" id="adminConfirmSubmit">Confirm</button></div></div></div></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function(){
+  let pendingForm = null;
+  function modalInstance(){ const el = document.getElementById('adminConfirmModal'); return el && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(el) : null; }
+  document.addEventListener('submit', function(event){
+    const form = event.target.closest('form[data-confirm-title], form[data-confirm-message]');
+    if (!form || form.dataset.confirmed === '1') return;
+    event.preventDefault();
+    pendingForm = form;
+    pendingForm._rookSubmitter = event.submitter || document.activeElement;
+    const titleEl = document.getElementById('adminConfirmTitle');
+    const bodyEl = document.getElementById('adminConfirmBody');
+    const submit = document.getElementById('adminConfirmSubmit');
+    if (titleEl) titleEl.textContent = form.dataset.confirmTitle || 'Confirm action';
+    if (bodyEl) bodyEl.textContent = form.dataset.confirmMessage || 'Are you sure you want to continue?';
+    if (submit) submit.textContent = form.dataset.confirmAction || 'Confirm';
+    const modal = modalInstance();
+    if (modal) modal.show();
+  }, true);
+  document.getElementById('adminConfirmSubmit')?.addEventListener('click', function(){
+    if (!pendingForm) return;
+    const submitter = pendingForm._rookSubmitter || pendingForm.querySelector('button[type=submit], input[type=submit]');
+    if (submitter && submitter.name) {
+      let hidden = pendingForm.querySelector('input[type=hidden][data-confirm-submitter="1"]');
+      if (!hidden) { hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.dataset.confirmSubmitter = '1'; pendingForm.appendChild(hidden); }
+      hidden.name = submitter.name;
+      hidden.value = submitter.value || '1';
+    }
+    pendingForm.dataset.confirmed = '1';
+    const modal = modalInstance();
+    if (modal) modal.hide();
+    if (pendingForm.requestSubmit) pendingForm.requestSubmit(); else pendingForm.submit();
+  });
+})();
+</script></body></html><?php }
+
 

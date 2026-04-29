@@ -21,6 +21,7 @@ function admin_config_contents(array $values): string {
         "defined('OLLAMA_URL') || define('OLLAMA_URL', AI_BASE_URL);\n" .
         "defined('OLLAMA_MODEL') || define('OLLAMA_MODEL', AI_MODEL);\n" .
         "defined('STRIPE_SECRET_KEY') || define('STRIPE_SECRET_KEY', " . $export($values['stripe_secret_key']) . ");\n" .
+        "defined('TEAM_CHAT_ENCRYPTION_KEY') || define('TEAM_CHAT_ENCRYPTION_KEY', " . $export(defined('TEAM_CHAT_ENCRYPTION_KEY') ? TEAM_CHAT_ENCRYPTION_KEY : bin2hex(random_bytes(32))) . ");\n" .
         "defined('TEAMS_REQUIRE_2FA') || define('TEAMS_REQUIRE_2FA', " . $exportBool($values['teams_require_2fa']) . ");\n" .
         "defined('APP_NAME') || define('APP_NAME', " . $export($values['app_name']) . ");\n" .
         "defined('APP_TAGLINE') || define('APP_TAGLINE', " . $export($values['app_tagline']) . ");\n";
