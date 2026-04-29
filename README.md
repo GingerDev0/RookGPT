@@ -17,6 +17,8 @@
 ![Teams](https://img.shields.io/badge/teams-supported-success?style=flat-square)
 ![Plans](https://img.shields.io/badge/plans-configurable-indigo?style=flat-square)
 ![Promo Codes](https://img.shields.io/badge/promo--codes-supported-pink?style=flat-square)
+![Security](https://img.shields.io/badge/security-hardened-success?style=flat-square)
+![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
 </div>
 
@@ -28,6 +30,9 @@
 
 The app can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
 
+> [!NOTE]
+> RookGPT is designed for private self-hosted and team deployments. Review your hosting, HTTPS, file permissions, and provider-key storage before exposing any self-hosted AI workspace to the public internet.
+
 ## 🚀 Highlights
 
 - 💬 Clean AI chat interface with conversation history
@@ -36,6 +41,9 @@ The app can run against a local Ollama model or a hosted AI provider such as **O
 - 🔍 Bootstrap image gallery for viewing uploaded chat images
 - 👤 User registration and login
 - 🔐 Single-session enforcement to prevent the same user account being active across multiple devices at once
+- 🧼 Markdown sanitisation for chat, share pages, and team messages
+- 🧱 Private uploaded images served through authenticated image routes
+- 🚦 Rate limiting for sensitive login, 2FA, recovery, and API flows
 - 🛡️ Two-factor authentication using authenticator apps and recovery codes
 - 👥 Teams area with members, conversations, activity, settings, API keys, and bot settings
 - 🤖 Team chat bot powered by the same AI provider/model as the main chat
@@ -111,7 +119,7 @@ ollama pull gemma4:e4b
 The installer imports `rook_chat.sql`, creates the database tables, writes `config/app.php`, creates the owner admin account, and signs the admin in automatically.
 
 > [!IMPORTANT]
-> After installation, protect or remove the installer route in production if your deployment process allows it.
+> After installation, protect or remove the installer route in production if your deployment process allows it. Keep `config/app.php`, uploads, logs, backups, and database dumps outside public access.
 
 ## ⚙️ Manual Configuration
 
@@ -376,17 +384,43 @@ privacy.php            Privacy page
 .htaccess              Apache routing rules
 ```
 
+## 🔒 Security Hardening
+
+RookGPT includes several safeguards for common self-hosted web app risks:
+
+| Area | Protection |
+|---|---|
+| SQL/database access | Uses prepared `mysqli` statements across normal data paths |
+| Markdown rendering | Sanitises rendered chat/share/team content to block stored XSS payloads |
+| Private uploads | Serves chat images through authenticated routes instead of exposing raw upload paths |
+| Team bot prompts | Derives bot prompts server-side instead of trusting browser-submitted prompt text |
+| Sessions | Hardened cookie settings and single-session enforcement |
+| 2FA | TOTP setup with recovery codes, plus optional 2FA requirement for team access |
+| Sensitive actions | CSRF protection for browser POST actions |
+| Provider requests | cURL hardening and URL validation for outbound AI/model-fetch requests |
+| Errors | Generic user-facing errors with internal details kept out of normal UI responses |
+| Rate limits | Login, 2FA, recovery-code, API, and sensitive request throttling |
+
+Recommended production checks:
+
+- Run behind HTTPS only.
+- Block public access to `config/`, `uploads/`, `storage/`, `logs/`, backups, SQL dumps, and local environment files.
+- Keep `/install/` locked or removed after setup.
+- Use strong owner/admin passwords and enable 2FA.
+- Rotate provider/API keys if they have ever been exposed.
+- Review custom AI provider endpoints before enabling them for administrators.
+
 ## 🛡️ Security Notes
 
-- Keep `config/app.php` private.
-- Use HTTPS in production.
-- Use strong admin passwords.
-- Enable 2FA before using team features when the admin setting requires it.
+- Keep `config/app.php` private and never commit production configuration.
+- Use HTTPS in production and set secure cookie behaviour at the web-server level too.
+- Use strong owner/admin passwords and require 2FA for team features where possible.
 - Keep PHP, MySQL/MariaDB, Apache, and dependencies updated.
-- Ensure uploads are served safely and only expected image MIME types are accepted.
+- Serve uploaded images through the authenticated image controller only.
 - Restrict access to `/install/` after setup.
 - Rotate exposed API keys or secrets immediately.
-- Do not commit production `config/app.php` files.
+- Do not expose logs, backups, SQL dumps, upload storage, or `.env`-style files from the web root.
+- Treat custom AI provider URLs as privileged/admin-only configuration.
 
 ## 🧪 Development Notes
 
@@ -399,6 +433,32 @@ privacy.php            Privacy page
 - Team bot replies use the app’s configured AI provider directly.
 - Internal API keys named `ChatBot` can be excluded from API usage stats.
 
+## 📦 Recommended Repository Files
+
+For public GitHub releases, include:
+
+```text
+README.md
+LICENSE
+SECURITY.md
+CHANGELOG.md
+.gitignore
+docs/SECURITY_MODEL.md
+docs/DEPLOYMENT.md
+```
+
+Suggested `.gitignore` entries:
+
+```gitignore
+config/app.php
+.env
+uploads/
+storage/
+logs/
+backups/
+*.sql
+```
+
 ## 🤝 Contributing
 
 Contributions, issues, and feature suggestions are welcome.
@@ -410,11 +470,14 @@ Before opening a pull request:
 3. Test plan upgrades, disabled plans, and promo codes.
 4. Test team chat, typing indicators, bot settings, and member bot permissions.
 5. Check that `/api` still requires a valid bearer token.
-6. Make sure no secrets are committed.
+6. Test unauthorised image access and shared conversation permissions.
+7. Make sure no secrets, logs, uploads, backups, or production configs are committed.
 
 ## 📜 License
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+
+Released under the MIT License. Add a `LICENSE` file containing the full MIT License text before publishing a formal GitHub release.
 
 ---
 
