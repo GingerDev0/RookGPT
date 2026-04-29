@@ -36,6 +36,7 @@ if (!$activeTeam): ?>
       </div>
       <div class="team-subnav" style="margin-top:10px;">
         <a href="<?= e(team_page_url('members', $activeTeam)) ?>"><i class="fa-solid fa-user-group"></i>Manage members</a>
+        <a href="<?= e(team_page_url('chat', $activeTeam)) ?>"><i class="fa-solid fa-message"></i>Team chat</a>
         <a href="<?= e(team_page_url('conversations', $activeTeam)) ?>"><i class="fa-solid fa-comments"></i>View conversations</a>
         <a href="<?= e(team_page_url('api-keys', $activeTeam)) ?>"><i class="fa-solid fa-key"></i>Team API keys</a>
         <a href="<?= e(team_page_url('activity', $activeTeam)) ?>"><i class="fa-solid fa-clock-rotate-left"></i>Recent changes</a>
