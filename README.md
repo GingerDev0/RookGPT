@@ -2,7 +2,7 @@
 
 # ♜ RookGPT
 
-### Self-hosted AI chat workspace for users, teams, APIs, plans, admin control, 2FA, and multiple AI providers.
+### A self-hosted AI chat workspace with teams chat, configurable plans, APIs, admin control, 2FA, and multiple AI providers.
 
 ![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-Database-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
@@ -14,44 +14,47 @@
 ![Self Hosted](https://img.shields.io/badge/self--hosted-yes-blue?style=flat-square)
 ![API](https://img.shields.io/badge/API-ready-purple?style=flat-square)
 ![2FA](https://img.shields.io/badge/2FA-supported-orange?style=flat-square)
-![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+![Teams](https://img.shields.io/badge/teams-supported-success?style=flat-square)
+![Plans](https://img.shields.io/badge/plans-configurable-indigo?style=flat-square)
+![Promo Codes](https://img.shields.io/badge/promo--codes-supported-pink?style=flat-square)
 
 </div>
 
 ---
 
-## Overview
+## ✨ Overview
 
-**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a ChatGPT-style interface, user accounts, configurable plans, team chat, team bot customisation, API keys, two-factor authentication, admin controls, promo codes, and an authenticated chat API.
+**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, configurable subscriptions, team chat, team bot customisation, API keys, 2FA-protected team access, admin controls, promo codes, and a simple authenticated chat API.
 
-RookGPT can use a local Ollama model or hosted providers including OpenAI, Anthropic Claude, Google Gemini, Mistral, Cohere, Groq, Perplexity, xAI, and OpenRouter.
+The app can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
 
-> [!NOTE]
-> RookGPT is designed for private self-hosted and team deployments. Review HTTPS, file permissions, upload access, installer access, and provider-key storage before exposing it publicly.
+## 🚀 Highlights
 
-## Features
+- 💬 Clean AI chat interface with conversation history
+- 🧠 Automatic conversation title and preview generation
+- 🖼️ Image upload and pasted-image support for vision-capable models
+- 🔍 Bootstrap image gallery for viewing uploaded chat images
+- 👤 User registration and login
+- 🔐 Single-session enforcement to prevent the same user account being active across multiple devices at once
+- 🛡️ Two-factor authentication using authenticator apps and recovery codes
+- 👥 Teams area with members, conversations, activity, settings, API keys, and bot settings
+- 🤖 Team chat bot powered by the same AI provider/model as the main chat
+- 🧩 Team bot customisation with bot name, mention trigger, prompt, style, temperature, Top P, Top K, context size, and reply length controls
+- ⌨️ Live “user is typing” indicators in team chat
+- ✅ Per-member permission to allow or block bot interaction
+- 🔑 Team API key management with copy support
+- 🧾 User API key management with masked key previews
+- 📊 API usage tracking with support for excluding internal ChatBot keys from stats
+- 🌐 Public JSON chat endpoint at `/api`
+- 📚 API dashboard, docs, playground, usage charts, and key management pages
+- 🧰 Admin dashboard for users, plans, promo codes, API keys, notifications, activity logs, and app settings
+- 💼 Fully configurable plan management from `/admin/prices`
+- 🏷️ Promo-code management from `/admin/promo`
+- 💳 Stripe checkout support with automatic zero-total upgrades when the payable subtotal is £0.00
+- 🪄 Installer wizard that writes `config/app.php`, imports the schema, creates the owner admin, and signs the admin in
+- 🔗 Extensionless routes through `.htaccess`
 
-- AI chat interface with conversation history
-- Automatic conversation titles and previews
-- Image upload and pasted-image support for vision-capable models
-- User registration, login, and single-session enforcement
-- Markdown sanitisation for chat, share pages, and team messages
-- Authenticated private image routes for uploaded chat images
-- Rate limiting for login, 2FA, recovery, and API flows
-- TOTP two-factor authentication with recovery codes
-- Teams area with chat, members, settings, activity, bot settings, and API keys
-- Configurable team bot with custom prompt, style, temperature, Top P, Top K, context size, and reply length
-- Per-member permission for bot interaction
-- User and team API key management
-- Public JSON chat endpoint at `/api`
-- API dashboard, documentation, playground, usage charts, and key management
-- Admin dashboard for users, plans, promo codes, API keys, notifications, activity logs, and app settings
-- Configurable plan and promo-code management
-- Stripe checkout support, including zero-total upgrades
-- Web installer for configuration, schema import, owner admin creation, and first login
-- Extensionless routes through `.htaccess`
-
-## Tech Stack
+## 🧱 Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -63,25 +66,33 @@ RookGPT can use a local Ollama model or hosted providers including OpenAI, Anthr
 | AI | Ollama or hosted AI provider |
 | Payments | Stripe checkout support |
 
-## Requirements
+## ✅ Requirements
 
-- PHP 8.1 or newer
-- MySQL or MariaDB database
+Make sure your server has:
+
+- PHP 8.1 or newer recommended
+- MySQL/MariaDB database access
 - Apache with `.htaccess` and `mod_rewrite` enabled
-- PHP extensions: `mysqli`, `curl`, `json`, `mbstring`, `fileinfo`, `openssl`
+- PHP extensions:
+  - `mysqli`
+  - `curl`
+  - `json`
+  - `mbstring`
+  - `fileinfo`
+  - `openssl`
 - Writable `config/` directory during installation
-- Writable upload directory if chat image uploads are enabled
+- Writable upload directory if you use chat image uploads
 
-For local AI, install and run Ollama, then pull a model, for example:
+For local AI, install and run Ollama, then pull a model such as:
 
 ```bash
 ollama pull gemma4:e4b
 ```
 
-## Quick Start
+## ⚡ Quick Start
 
 1. Upload the project files to your web server.
-2. Make sure Apache can read the project and write to `config/` during installation.
+2. Make sure Apache can read the project and write to `config/` while installing.
 3. Open the site in your browser.
 4. If `config/app.php` does not exist, the app redirects to:
 
@@ -100,11 +111,11 @@ ollama pull gemma4:e4b
 The installer imports `rook_chat.sql`, creates the database tables, writes `config/app.php`, creates the owner admin account, and signs the admin in automatically.
 
 > [!IMPORTANT]
-> After installation, protect or remove the installer route in production. Keep `config/app.php`, uploads, logs, backups, and database dumps outside public access.
+> After installation, protect or remove the installer route in production if your deployment process allows it.
 
-## Manual Configuration
+## ⚙️ Manual Configuration
 
-Copy:
+You can configure the app manually by copying:
 
 ```text
 config/app.example.php
@@ -116,9 +127,7 @@ to:
 config/app.php
 ```
 
-Then update the database, AI provider, Stripe, and app settings.
-
-Example values:
+Then edit the values:
 
 ```php
 defined('DB_HOST') || define('DB_HOST', '127.0.0.1');
@@ -136,18 +145,20 @@ defined('APP_NAME') || define('APP_NAME', 'RookGPT');
 defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');
 ```
 
-Plan definitions are stored in `config/app.php` using `ROOK_PLAN_DEFINITIONS`.
+Plan definitions are also stored in `config/app.php` using `ROOK_PLAN_DEFINITIONS`, allowing custom plan names, prices, limits, and feature gates.
 
-Import the schema:
+Then import the schema:
 
 ```bash
 mysql -u your_user -p rook_chat < rook_chat.sql
 ```
 
-## Supported AI Providers
+## 🤖 Supported AI Providers
+
+RookGPT includes provider presets for:
 
 | Provider | Default model | Notes |
-|---|---|---|
+|---|---:|---|
 | Ollama | `gemma4:e4b` | Local/self-hosted default |
 | OpenAI | `gpt-4.1-mini` | Chat Completions API |
 | Anthropic Claude | `claude-3-5-sonnet-latest` | Messages API |
@@ -159,9 +170,9 @@ mysql -u your_user -p rook_chat < rook_chat.sql
 | xAI | `grok-2-latest` | OpenAI-compatible endpoint |
 | OpenRouter | `openai/gpt-4o-mini` | Multi-model gateway |
 
-The installer and admin settings page can fetch available models when the selected provider endpoint and API key are valid.
+The installer and admin settings page can fetch available models from the selected provider when the endpoint and API key are valid.
 
-## Main Routes
+## 🧭 Routes
 
 | Route | Purpose |
 |---|---|
@@ -186,7 +197,7 @@ The installer and admin settings page can fetch available models when the select
 | `/terms` | Terms of Service |
 | `/privacy` | Privacy Policy |
 
-## API Usage
+## 🔌 API Usage
 
 The public API endpoint is:
 
@@ -195,6 +206,8 @@ POST /api
 ```
 
 Use a bearer token generated from the API dashboard.
+
+### Example Request
 
 ```bash
 curl -X POST https://your-domain.com/api \
@@ -210,7 +223,7 @@ curl -X POST https://your-domain.com/api \
   }'
 ```
 
-Example response:
+### Example Response
 
 ```json
 {
@@ -237,7 +250,7 @@ Example response:
 | `top_k` | integer | No | Ollama option; defaults to `64` |
 | `think` | boolean | No | Enables model thinking output when supported |
 
-## Plans and Promo Codes
+## 💼 Plans, Pricing, and Feature Gates
 
 Plans are configurable from:
 
@@ -245,31 +258,106 @@ Plans are configurable from:
 /admin/prices
 ```
 
-Admin users can create, edit, disable, delete, order, and feature-gate plans. Supported gates include API access, daily API calls, teams access, team sharing, thinking/reasoning, personality controls, sharing, rename support, message limits, and conversation limits.
+Admin users can:
 
-Promo codes are managed from:
+- Add plans
+- Edit plans
+- Disable plans
+- Delete plans
+- Set plan labels, slugs, prices, descriptions, and display order
+- Configure usage limits
+- Control feature gates per plan
+
+Supported feature gates include:
+
+| Feature | Configurable |
+|---|---:|
+| Thinking/reasoning | Yes |
+| API access | Yes |
+| API daily calls | Yes |
+| AI personality controls | Yes |
+| Conversation rename | Yes |
+| Share snapshots | Yes |
+| Teams access | Yes |
+| Team sharing | Yes |
+| Message limits | Yes |
+| Conversation limits | Yes |
+
+Disabled plans are hidden from the upgrade modal and upgrade comparison table.
+
+Deleting a plan can move affected users back to Free and disable promo codes targeting that plan.
+
+## 🏷️ Promo Codes
+
+Promo codes can be managed from:
 
 ```text
 /admin/promo
 ```
 
-Promo codes can support percentage discounts, fixed-value discounts, plan-specific targeting, usage tracking, and enable/disable state. If the payable upgrade subtotal is `£0.00`, the account is upgraded immediately without Stripe checkout.
+Promo codes can be used during upgrade checkout and may support:
 
-## Teams
+- Percentage discounts
+- Fixed-value discounts
+- Plan-specific targeting
+- Enable/disable state
+- Usage tracking
 
-The teams area includes team chat, members, conversations, activity, settings, bot settings, and team API keys.
+If the final payable upgrade subtotal is `£0.00`, the account is upgraded immediately without sending the user to Stripe.
 
-The team bot uses the same configured AI provider and model as the main chat and does not require a team API key. Team owners can customise the bot and control which members can interact with it.
+## 👥 Teams
 
-Team features can require 2FA when enabled from admin settings.
+The teams area includes:
 
-## Two-Factor Authentication
+- Team dashboard
+- Team chat
+- Members
+- Conversations
+- Activity
+- Settings
+- Bot Settings
+- Team API keys
 
-RookGPT supports TOTP-based 2FA using Google Authenticator, Microsoft Authenticator, Authy, 1Password, or any compatible authenticator app.
+Team features can require 2FA when enabled from `/admin/settings`.
 
-Users can enable 2FA from account settings by scanning a QR code and saving recovery codes.
+## 🤖 Team Bot Settings
 
-## Project Structure
+Team bot customisation is available from:
+
+```text
+/teams/bot-settings
+```
+
+The team bot uses the same configured AI provider and model as the main chat. It does not require a team API key.
+
+Configurable options include:
+
+- Bot enabled/disabled state
+- Bot name
+- Mention trigger
+- Custom prompt
+- Response style
+- Temperature
+- Top P
+- Top K
+- Context message count
+- Max reply characters
+
+Team owners can also control whether each member can interact with the bot from:
+
+```text
+/teams/members
+```
+
+Members without bot permission can still send normal team messages, but bot mentions will not trigger a response.
+
+## 🔐 Two-Factor Authentication
+
+RookGPT supports TOTP-based 2FA using apps such as Google Authenticator, Microsoft Authenticator, Authy, 1Password, or any compatible authenticator app.
+
+Team features can require 2FA when enabled in `/admin/settings`. Users can enable 2FA from account settings by scanning the QR code and saving recovery codes.
+
+## 📁 Project Structure
 
 ```text
 admin/                 Admin dashboard pages, plan management, promo codes
@@ -288,74 +376,65 @@ privacy.php            Privacy page
 .htaccess              Apache routing rules
 ```
 
-## Security
+## 🛡️ Security Notes
 
-RookGPT includes safeguards for common self-hosted web app risks:
+- Keep `config/app.php` private.
+- Use HTTPS in production.
+- Use strong admin passwords.
+- Enable 2FA before using team features when the admin setting requires it.
+- Keep PHP, MySQL/MariaDB, Apache, and dependencies updated.
+- Ensure uploads are served safely and only expected image MIME types are accepted.
+- Restrict access to `/install/` after setup.
+- Rotate exposed API keys or secrets immediately.
+- Do not commit production `config/app.php` files.
 
-- Prepared `mysqli` statements across normal data paths
-- Sanitised rendered markdown for chat, share pages, and team content
-- Authenticated image routes for private uploads
-- Server-derived team bot prompts
-- Hardened cookie settings and single-session enforcement
-- TOTP setup with recovery codes
-- Optional 2FA requirement for team access
-- CSRF protection for browser POST actions
-- cURL hardening and URL validation for outbound provider requests
-- Generic user-facing errors
-- Rate limits for login, 2FA, recovery-code, API, and sensitive request flows
+## 🧪 Development Notes
 
-Recommended production checks:
-
-- Use HTTPS only.
-- Block public access to `config/`, `uploads/`, `storage/`, `logs/`, backups, SQL dumps, and local environment files.
-- Keep `/install/` locked or removed after setup.
-- Use strong owner/admin passwords and enable 2FA.
-- Rotate provider/API keys if they have ever been exposed.
-- Review custom AI provider endpoints before enabling them.
-
-## Development Notes
-
+- The app uses `mysqli` prepared statements for database access.
 - `.htaccess` preserves the `Authorization` header so bearer tokens work with Apache/PHP.
-- `/api` is the JSON endpoint; `/api/` is the web dashboard.
-- Explicit `.php` browser requests redirect to extensionless URLs.
+- `/api` is intentionally the JSON endpoint, while `/api/` is the web dashboard.
+- Explicit `.php` browser requests are redirected to extensionless URLs for cleaner routes.
 - Provider model fetching is handled in `lib/ai_providers.php`.
 - Plan logic is centralised through shared plan helpers.
 - Team bot replies use the app’s configured AI provider directly.
 - Internal API keys named `ChatBot` can be excluded from API usage stats.
 
-## Recommended Repository Files
+## 🗺️ Coming Soon
 
-```text
-README.md
-LICENSE
-SECURITY.md
-CHANGELOG.md
-.gitignore
-docs/SECURITY_MODEL.md
-docs/DEPLOYMENT.md
-```
+Planned ideas for future RookGPT releases include:
 
-Suggested `.gitignore` entries:
+- 🧠 **Per-user AI profiles** for saved tones, prompts, temperatures, and preferred providers
+- 📎 **File-aware chat** with document upload, summarisation, and retrieval-assisted answers
+- 🔎 **Workspace search** across conversations, team messages, shared snapshots, and uploaded files
+- 🧑‍💼 **Role-based admin permissions** so owners can delegate support, billing, and moderation tasks
+- 🏢 **Multi-team organisations** with organisation-level billing, settings, and audit views
+- 📡 **Webhooks and event logs** for API usage, billing events, team activity, and security alerts
+- 🧾 **Advanced billing options** including metered API usage, invoices, trials, and coupons
+- 🛠️ **Plugin/tool calling support** for custom actions, internal tools, and provider-native function calling
+- 🌍 **Internationalisation** for multiple languages, regional date formats, and custom currency display
+- 📱 **Progressive Web App improvements** for installable mobile/desktop usage and richer notifications
+- 🧪 **Model comparison playground** to test prompts across multiple providers side by side
+- 🛡️ **Expanded security controls** such as IP allowlists, device management, and admin audit exports
 
-```gitignore
-config/app.php
-.env
-uploads/
-storage/
-logs/
-backups/
-*.sql
-```
+> [!NOTE]
+> These items are roadmap ideas, not guaranteed release commitments. Feature priority may change based on feedback, security requirements, and project direction.
 
-## Contributing
+## 🤝 Contributing
 
 Contributions, issues, and feature suggestions are welcome.
 
-Before opening a pull request, test the installer, authentication, chat, upgrades, promo codes, teams, API access, image permissions, and make sure no secrets, logs, uploads, backups, or production configs are committed.
+Before opening a pull request:
 
-## License
+1. Test the installer.
+2. Test login, registration, and chat.
+3. Test plan upgrades, disabled plans, and promo codes.
+4. Test team chat, typing indicators, bot settings, and member bot permissions.
+5. Check that `/api` still requires a valid bearer token.
+6. Make sure no secrets are committed.
 
-Released under the MIT License. Add a `LICENSE` file containing the full MIT License text before publishing a formal release.
+## 📜 License
+
+![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 ---
 
