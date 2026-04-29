@@ -123,7 +123,12 @@ function ensure_team_schema(): void
         // Column already exists or table has not been created yet.
     }
     try {
-        db_execute('UPDATE team_members SET can_view_api_keys = 1, can_manage_api_keys = 1 WHERE role = "owner"');
+        db_execute('ALTER TABLE team_members ADD COLUMN can_interact_with_bot TINYINT(1) NOT NULL DEFAULT 1 AFTER can_manage_api_keys');
+    } catch (Throwable $e) {
+        // Column already exists or table has not been created yet.
+    }
+    try {
+        db_execute('UPDATE team_members SET can_view_api_keys = 1, can_manage_api_keys = 1, can_interact_with_bot = 1 WHERE role = "owner"');
     } catch (Throwable $e) {
         // Keep page usable even if the migration is not available.
     }
@@ -134,7 +139,7 @@ function ensure_team_schema(): void
     }
     try { db_execute('ALTER TABLE team_members MODIFY COLUMN pre_team_plan VARCHAR(64) NULL'); } catch (Throwable $e) {}
     try {
-        db_execute('ALTER TABLE team_members ADD COLUMN pre_team_plan VARCHAR(64) NULL AFTER can_manage_api_keys');
+        db_execute('ALTER TABLE team_members ADD COLUMN pre_team_plan VARCHAR(64) NULL AFTER can_interact_with_bot');
     } catch (Throwable $e) {
         // Column already exists or table has not been created yet.
     }
@@ -148,6 +153,17 @@ function ensure_team_schema(): void
     } catch (Throwable $e) {
         // Best-effort backfill for legacy rows.
     }
+    try { if (!db_column_exists('teams', 'bot_enabled')) db()->query("ALTER TABLE teams ADD COLUMN bot_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER token"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_name')) db()->query("ALTER TABLE teams ADD COLUMN bot_name VARCHAR(80) NOT NULL DEFAULT 'AI' AFTER bot_enabled"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_mention')) db()->query("ALTER TABLE teams ADD COLUMN bot_mention VARCHAR(40) NOT NULL DEFAULT '@AI' AFTER bot_name"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_custom_prompt')) db()->query("ALTER TABLE teams ADD COLUMN bot_custom_prompt MEDIUMTEXT NULL AFTER bot_mention"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_response_style')) db()->query("ALTER TABLE teams ADD COLUMN bot_response_style VARCHAR(40) NOT NULL DEFAULT 'concise' AFTER bot_custom_prompt"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_temperature')) db()->query("ALTER TABLE teams ADD COLUMN bot_temperature DECIMAL(3,2) NOT NULL DEFAULT 1.00 AFTER bot_response_style"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_top_p')) db()->query("ALTER TABLE teams ADD COLUMN bot_top_p DECIMAL(3,2) NOT NULL DEFAULT 0.95 AFTER bot_temperature"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_top_k')) db()->query("ALTER TABLE teams ADD COLUMN bot_top_k INT UNSIGNED NOT NULL DEFAULT 64 AFTER bot_top_p"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_context_messages')) db()->query("ALTER TABLE teams ADD COLUMN bot_context_messages INT UNSIGNED NOT NULL DEFAULT 100 AFTER bot_top_k"); } catch (Throwable $e) {}
+    try { if (!db_column_exists('teams', 'bot_max_reply_chars')) db()->query("ALTER TABLE teams ADD COLUMN bot_max_reply_chars INT UNSIGNED NOT NULL DEFAULT 5000 AFTER bot_context_messages"); } catch (Throwable $e) {}
+    try { db()->query("UPDATE teams SET bot_name = COALESCE(NULLIF(bot_name, ''), 'AI'), bot_mention = COALESCE(NULLIF(bot_mention, ''), '@AI')"); } catch (Throwable $e) {}
     try {
         db_execute('CREATE TABLE IF NOT EXISTS team_changes (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -326,6 +342,15 @@ function can_send_team_chat(?array $team, ?array $membership, array $user): bool
     if (!$team) return false;
     if ((int) ($team['owner_user_id'] ?? 0) === (int) ($user['id'] ?? 0)) return true;
     return $membership && (int) ($membership['team_id'] ?? 0) === (int) ($team['id'] ?? 0) && (int) ($membership['can_send_messages'] ?? 0) === 1;
+}
+
+function can_interact_with_team_bot(?array $team, ?array $membership, array $user): bool
+{
+    if (!$team) return false;
+    if ((int) ($team['owner_user_id'] ?? 0) === (int) ($user['id'] ?? 0)) return true;
+    return $membership
+        && (int) ($membership['team_id'] ?? 0) === (int) ($team['id'] ?? 0)
+        && (int) ($membership['can_interact_with_bot'] ?? 1) === 1;
 }
 
 function team_chat_avatar_hue(int $userId): int
@@ -544,13 +569,81 @@ function fetch_team_chat_typing_users(int $teamId, int $excludeUserId = 0, int $
     );
 }
 
+function team_bot_settings(?array $team): array
+{
+    $mention = trim((string) ($team['bot_mention'] ?? '@AI'));
+    if ($mention === '') $mention = '@AI';
+    if ($mention[0] !== '@') $mention = '@' . $mention;
+    $mention = preg_replace('/\s+/u', '', $mention) ?: '@AI';
+
+    $name = trim((string) ($team['bot_name'] ?? 'AI'));
+    if ($name === '') $name = 'AI';
+
+    $style = trim((string) ($team['bot_response_style'] ?? 'concise'));
+    if (!in_array($style, ['concise', 'balanced', 'detailed'], true)) $style = 'concise';
+
+    return [
+        'enabled' => (int) ($team['bot_enabled'] ?? 1) === 1,
+        'name' => mb_substr($name, 0, 80, 'UTF-8'),
+        'mention' => mb_substr($mention, 0, 40, 'UTF-8'),
+        'custom_prompt' => trim((string) ($team['bot_custom_prompt'] ?? '')),
+        'response_style' => $style,
+        'temperature' => max(0.0, min(2.0, (float) ($team['bot_temperature'] ?? 1.0))),
+        'top_p' => max(0.0, min(1.0, (float) ($team['bot_top_p'] ?? 0.95))),
+        'top_k' => max(1, min(200, (int) ($team['bot_top_k'] ?? 64))),
+        'context_messages' => max(10, min(200, (int) ($team['bot_context_messages'] ?? 100))),
+        'max_reply_chars' => max(500, min(12000, (int) ($team['bot_max_reply_chars'] ?? 5000))),
+    ];
+}
+
+function fetch_team_bot_settings(int $teamId): array
+{
+    ensure_team_schema();
+    $team = db_fetch_one('SELECT * FROM teams WHERE id = ? LIMIT 1', 'i', [$teamId]);
+    return team_bot_settings($team);
+}
+
+function normalize_team_bot_mention(string $mention): string
+{
+    $mention = trim($mention);
+    if ($mention === '') return '@AI';
+    if ($mention[0] !== '@') $mention = '@' . $mention;
+    $mention = preg_replace('/\s+/u', '', $mention) ?: '@AI';
+    if (!preg_match('/^@[A-Za-z0-9_\-]{2,39}$/', $mention)) return '@AI';
+    return $mention;
+}
+
+function update_team_bot_settings(int $teamId, array $input): void
+{
+    ensure_team_schema();
+    $name = trim((string) ($input['bot_name'] ?? 'AI'));
+    if ($name === '') $name = 'AI';
+    $name = mb_substr($name, 0, 80, 'UTF-8');
+    $mention = normalize_team_bot_mention((string) ($input['bot_mention'] ?? '@AI'));
+    $customPrompt = trim((string) ($input['bot_custom_prompt'] ?? ''));
+    if (mb_strlen($customPrompt, 'UTF-8') > 4000) $customPrompt = mb_substr($customPrompt, 0, 4000, 'UTF-8');
+    $style = (string) ($input['bot_response_style'] ?? 'concise');
+    if (!in_array($style, ['concise', 'balanced', 'detailed'], true)) $style = 'concise';
+    $temperature = max(0.0, min(2.0, (float) ($input['bot_temperature'] ?? 1.0)));
+    $topP = max(0.0, min(1.0, (float) ($input['bot_top_p'] ?? 0.95)));
+    $topK = max(1, min(200, (int) ($input['bot_top_k'] ?? 64)));
+    $contextMessages = max(10, min(200, (int) ($input['bot_context_messages'] ?? 100)));
+    $maxReplyChars = max(500, min(12000, (int) ($input['bot_max_reply_chars'] ?? 5000)));
+    $enabled = isset($input['bot_enabled']) ? 1 : 0;
+
+    db_execute(
+        'UPDATE teams SET bot_enabled = ?, bot_name = ?, bot_mention = ?, bot_custom_prompt = ?, bot_response_style = ?, bot_temperature = ?, bot_top_p = ?, bot_top_k = ?, bot_context_messages = ?, bot_max_reply_chars = ? WHERE id = ?',
+        'issssddiiii',
+        [$enabled, $name, $mention, $customPrompt, $style, $temperature, $topP, $topK, $contextMessages, $maxReplyChars, $teamId]
+    );
+}
+
 function team_chat_ai_key_plaintext(int $teamId): array
 {
-    $key = fetch_team_chatbot_api_key($teamId);
-    if (!$key) return ['ok' => false, 'message' => team_chat_ai_setup_message(false), 'key' => ''];
-    $plainKey = api_key_secret_decrypt($key['secret_cipher'] ?? null);
-    if ($plainKey === '') return ['ok' => false, 'message' => team_chat_ai_setup_message(true), 'key' => ''];
-    return ['ok' => true, 'message' => '', 'key' => $plainKey];
+    // Kept for backwards compatibility with older code paths, but team chat AI
+    // no longer requires a team API key. It now uses the same configured AI
+    // provider/model as the main chat in index.php.
+    return ['ok' => true, 'message' => '', 'key' => ''];
 }
 
 function api_key_secret_encrypt(string $plain): string
@@ -588,13 +681,15 @@ function fetch_team_chatbot_api_key(int $teamId): ?array
 
 function team_chat_ai_setup_message(bool $secretMissing = false): string
 {
-    if ($secretMissing) return 'AI is not set up yet. Ask the team owner to delete and recreate the team API key named ChatBot, then try @AI again.';
-    return 'AI is not set up yet. Ask the team owner to create a team API key named ChatBot in Team API keys, then try @AI again.';
+    return 'AI is not set up yet. Ask an admin to configure the main AI provider in Admin settings.';
 }
 
-function team_chat_ai_trigger(string $message): ?string
+function team_chat_ai_trigger(string $message, ?array $team = null): ?string
 {
-    if (!preg_match('/^\s*@AI\b\s*(.*)$/iu', $message, $matches)) return null;
+    $settings = team_bot_settings($team);
+    if (!$settings['enabled']) return null;
+    $mention = preg_quote((string) $settings['mention'], '/');
+    if (!preg_match('/^\s*' . $mention . '(?:\b|\s)(.*)$/iu', $message, $matches)) return null;
     $prompt = trim((string) ($matches[1] ?? ''));
     return $prompt !== '' ? $prompt : null;
 }
@@ -605,10 +700,21 @@ function team_chat_ai_requester_name(array $requestingUser): string
     return $name !== '' ? $name : 'this team member';
 }
 
-function team_chat_ai_system_prompt(array $requestingUser): string
+function team_chat_ai_system_prompt(array $requestingUser, ?array $team = null): string
 {
+    $settings = team_bot_settings($team);
     $name = team_chat_ai_requester_name($requestingUser);
-    return "You are the AI assistant inside the RookGPT team chat. The team member who invoked you is named {$name}. When they ask who they are, what their name is, or use words like me/my/I, answer using {$name} as the current user. Do not confuse them with other team members. You can reference the recent team chat history provided in the conversation messages. Each chat-history message is prefixed with the speaker name, for example 'GingerDev: hello'. Use that history when it helps, but treat the current request from {$name} as the message to answer. Keep replies concise and helpful. Do not prefix your response with Rook:, AI:, Assistant:, Bot:, or your own name.";
+    $botName = (string) $settings['name'];
+    $styleLine = match ((string) $settings['response_style']) {
+        'detailed' => 'Give detailed, structured answers when useful.',
+        'balanced' => 'Use a balanced level of detail.',
+        default => 'Keep replies concise and helpful.',
+    };
+    $prompt = "Your name is {$botName}. You are the team chat assistant. You are not called Rook, RookGPT, AI, Assistant, or Bot unless the team has explicitly set that as your bot name. The team member who invoked you is named {$name}. When they ask who they are, what their name is, or use words like me/my/I, answer using {$name} as the current user. Do not confuse them with other team members. You can reference the recent team chat history provided in the conversation messages. Each chat-history message is prefixed with the speaker name, for example 'GingerDev: hello'. Use that history when it helps, but treat the current request from {$name} as the message to answer. {$styleLine} Do not prefix your response with Rook:, RookGPT:, AI:, Assistant:, Bot:, or {$botName}:";
+    if ((string) $settings['custom_prompt'] !== '') {
+        $prompt .= "\n\nTeam custom instructions for {$botName}:\n" . (string) $settings['custom_prompt'];
+    }
+    return $prompt;
 }
 
 function team_chat_clean_ai_reply(string $reply): string
@@ -622,7 +728,7 @@ function team_chat_clean_ai_reply(string $reply): string
     }
     return $reply;
 }
-function team_chat_ai_context_messages(int $teamId, array $requestingUser, string $currentPrompt, int $beforeMessageId = 0): array
+function team_chat_ai_context_messages(int $teamId, array $requestingUser, string $currentPrompt, int $beforeMessageId = 0, ?array $team = null): array
 {
     ensure_team_chat_schema();
     $beforeMessageId = max(0, $beforeMessageId);
@@ -637,7 +743,7 @@ function team_chat_ai_context_messages(int $teamId, array $requestingUser, strin
             INNER JOIN users u ON u.id = tcm.user_id
             WHERE tcm.team_id = ? AND tcm.deleted_at IS NULL $whereBefore
             ORDER BY tcm.id DESC
-            LIMIT 100
+            LIMIT " . (int) team_bot_settings($team)['context_messages'] . "
          ) recent_context ORDER BY id ASC",
         $types,
         $params
@@ -683,58 +789,47 @@ function team_chat_ai_context_messages(int $teamId, array $requestingUser, strin
     return $messages;
 }
 
+function team_chat_ai_provider_messages(int $teamId, array $requestingUser, string $prompt, int $beforeMessageId = 0, ?array $team = null): array
+{
+    $settingsTeam = $team ?: db_fetch_one('SELECT * FROM teams WHERE id = ? LIMIT 1', 'i', [$teamId]);
+    $messages = [[
+        'role' => 'system',
+        'content' => team_chat_ai_system_prompt($requestingUser, $settingsTeam),
+    ]];
+    foreach (team_chat_ai_context_messages($teamId, $requestingUser, $prompt, $beforeMessageId, $settingsTeam) as $message) {
+        $messages[] = $message;
+    }
+    return $messages;
+}
+
+function team_chat_ai_provider_payload(int $teamId, array $requestingUser, string $prompt, int $beforeMessageId = 0, ?array $team = null, bool $stream = false): array
+{
+    $settings = team_bot_settings($team ?: db_fetch_one('SELECT * FROM teams WHERE id = ? LIMIT 1', 'i', [$teamId]));
+    $extra = [
+        'top_p' => (float) $settings['top_p'],
+        'top_k' => (int) $settings['top_k'],
+        'num_predict' => max(128, (int) ceil(((int) $settings['max_reply_chars']) / 4)),
+        'max_tokens' => max(128, (int) ceil(((int) $settings['max_reply_chars']) / 4)),
+    ];
+    return rook_ai_payload(
+        team_chat_ai_provider_messages($teamId, $requestingUser, $prompt, $beforeMessageId, $team),
+        $stream,
+        false,
+        (float) $settings['temperature'],
+        $extra
+    );
+}
+
 function team_chat_generate_ai_reply(int $teamId, array $requestingUser, string $prompt): string
 {
-    $keyState = team_chat_ai_key_plaintext($teamId);
-    if (empty($keyState['ok'])) return (string) $keyState['message'];
-    $plainKey = (string) $keyState['key'];
-
     if (!function_exists('curl_init')) throw new RuntimeException('cURL is not enabled on this server.');
-
-    $payload = [
-        'system_prompt' => team_chat_ai_system_prompt($requestingUser),
-        'messages' => team_chat_ai_context_messages($teamId, $requestingUser, $prompt),
-        'think' => false,
-        'temperature' => 1,
-        'top_p' => 0.95,
-        'top_k' => 64,
-        'streaming' => false,
-    ];
-
-    $ch = curl_init('https://pc.streamhive.uk/api');
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 15,
-        CURLOPT_TIMEOUT => 180,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $plainKey,
-        ],
-        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-    ]);
-
-    $response = curl_exec($ch);
-    $errno = curl_errno($ch);
-    $error = curl_error($ch);
-    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    curl_close($ch);
-
-    if ($response === false || $errno !== 0) {
-        throw new RuntimeException($error !== '' ? $error : 'Could not reach the AI API.');
-    }
-
-    $data = json_decode((string) $response, true);
-    if (!is_array($data)) throw new RuntimeException('The AI API returned invalid JSON.');
-    if ($status >= 400 || (isset($data['ok']) && $data['ok'] === false)) {
-        throw new RuntimeException((string) ($data['error'] ?? ('AI API request failed with HTTP ' . $status)));
-    }
-
-    $reply = trim((string) ($data['message'] ?? ''));
-    if ($reply === '') $reply = trim((string) ($data['response'] ?? $data['content'] ?? ''));
-    $reply = team_chat_clean_ai_reply($reply);
-    if ($reply === '') throw new RuntimeException('The AI API returned an empty response.');
-    if (mb_strlen($reply, 'UTF-8') > 5000) $reply = mb_substr($reply, 0, 5000, 'UTF-8');
+    $team = db_fetch_one('SELECT * FROM teams WHERE id = ? LIMIT 1', 'i', [$teamId]);
+    $payload = team_chat_ai_provider_payload($teamId, $requestingUser, $prompt, 0, $team, false);
+    $data = rook_ai_post_json($payload, 600);
+    $reply = team_chat_clean_ai_reply(trim(rook_ai_response_text($data)));
+    if ($reply === '') throw new RuntimeException(rook_ai_label() . ' returned an empty response.');
+    $maxChars = team_bot_settings($team)['max_reply_chars'];
+    if (mb_strlen($reply, 'UTF-8') > $maxChars) $reply = mb_substr($reply, 0, $maxChars, 'UTF-8');
     return $reply;
 }
 
@@ -835,18 +930,18 @@ function plan_label(string $plan): string
 
 function fetch_owned_team(int $ownerUserId): ?array
 {
-    return db_fetch_one('SELECT id, name, owner_user_id, token, created_at FROM teams WHERE owner_user_id = ? LIMIT 1', 'i', [$ownerUserId]);
+    return db_fetch_one('SELECT * FROM teams WHERE owner_user_id = ? LIMIT 1', 'i', [$ownerUserId]);
 }
 
 function fetch_team_by_token(string $token, int $ownerUserId): ?array
 {
-    return db_fetch_one('SELECT id, name, owner_user_id, token, created_at FROM teams WHERE token = ? AND owner_user_id = ? LIMIT 1', 'si', [$token, $ownerUserId]);
+    return db_fetch_one('SELECT * FROM teams WHERE token = ? AND owner_user_id = ? LIMIT 1', 'si', [$token, $ownerUserId]);
 }
 
 function fetch_team_members(int $teamId): array
 {
     return db_fetch_all(
-        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, COALESCE(tm.can_view_api_keys, 0) AS can_view_api_keys, COALESCE(tm.can_manage_api_keys, 0) AS can_manage_api_keys, tm.pre_team_plan, tm.pre_team_thinking_enabled, tm.created_at, u.username, u.email, u.plan
+        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, COALESCE(tm.can_view_api_keys, 0) AS can_view_api_keys, COALESCE(tm.can_manage_api_keys, 0) AS can_manage_api_keys, COALESCE(tm.can_interact_with_bot, 1) AS can_interact_with_bot, tm.pre_team_plan, tm.pre_team_thinking_enabled, tm.created_at, u.username, u.email, u.plan
          FROM team_members tm
          INNER JOIN users u ON u.id = tm.user_id
          WHERE tm.team_id = ?
@@ -859,7 +954,7 @@ function fetch_team_members(int $teamId): array
 function fetch_user_team_membership(int $userId): ?array
 {
     return db_fetch_one(
-        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, COALESCE(tm.can_view_api_keys, 0) AS can_view_api_keys, COALESCE(tm.can_manage_api_keys, 0) AS can_manage_api_keys, tm.pre_team_plan, tm.pre_team_thinking_enabled, t.name, t.token, t.owner_user_id, t.created_at
+        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, COALESCE(tm.can_view_api_keys, 0) AS can_view_api_keys, COALESCE(tm.can_manage_api_keys, 0) AS can_manage_api_keys, COALESCE(tm.can_interact_with_bot, 1) AS can_interact_with_bot, tm.pre_team_plan, tm.pre_team_thinking_enabled, t.name, t.token, t.owner_user_id, t.created_at, t.bot_enabled, t.bot_name, t.bot_mention, t.bot_custom_prompt, t.bot_response_style, t.bot_temperature, t.bot_top_p, t.bot_top_k, t.bot_context_messages, t.bot_max_reply_chars
          FROM team_members tm
          INNER JOIN teams t ON t.id = tm.team_id
          WHERE tm.user_id = ?
@@ -1014,7 +1109,7 @@ function add_owner_membership(int $teamId, int $ownerUserId): void
     $owner = db_fetch_one('SELECT plan, thinking_enabled FROM users WHERE id = ? LIMIT 1', 'i', [$ownerUserId]);
     $prePlan = (string) ($owner['plan'] ?? 'free');
     $preThinking = (int) ($owner['thinking_enabled'] ?? 0);
-    db_execute('INSERT IGNORE INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, can_view_api_keys, can_manage_api_keys, pre_team_plan, pre_team_thinking_enabled, created_at) VALUES (?, ?, "owner", 1, 1, 1, 1, 1, ?, ?, NOW())', 'iisi', [$teamId, $ownerUserId, $prePlan, $preThinking]);
+    db_execute('INSERT IGNORE INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, can_view_api_keys, can_manage_api_keys, can_interact_with_bot, pre_team_plan, pre_team_thinking_enabled, created_at) VALUES (?, ?, "owner", 1, 1, 1, 1, 1, 1, ?, ?, NOW())', 'iisi', [$teamId, $ownerUserId, $prePlan, $preThinking]);
     $teamPlan = rook_first_enabled_plan_with('team_access', 'business');
     db_execute('UPDATE users SET plan = ?, thinking_enabled = 1 WHERE id = ?', 'si', [$teamPlan, $ownerUserId]);
 }
@@ -1041,7 +1136,7 @@ function team_page_url(string $page = 'index', ?array $team = null, array $param
 
 function team_return_url(?array $team = null, string $fallbackPage = 'index'): string
 {
-    $allowed = ['index', 'chat', 'members', 'conversations', 'api-keys', 'activity', 'settings'];
+    $allowed = ['index', 'chat', 'members', 'conversations', 'api-keys', 'bot-settings', 'activity', 'settings'];
     $page = trim((string) ($_POST['_return_to'] ?? $fallbackPage));
     if (!in_array($page, $allowed, true)) $page = $fallbackPage;
     return team_page_url($page, $team);
@@ -1105,6 +1200,16 @@ try {
             'owner_user_id' => $membershipForPost['owner_user_id'],
             'token' => $membershipForPost['token'],
             'created_at' => $membershipForPost['created_at'],
+            'bot_enabled' => $membershipForPost['bot_enabled'] ?? 1,
+            'bot_name' => $membershipForPost['bot_name'] ?? 'AI',
+            'bot_mention' => $membershipForPost['bot_mention'] ?? '@AI',
+            'bot_custom_prompt' => $membershipForPost['bot_custom_prompt'] ?? '',
+            'bot_response_style' => $membershipForPost['bot_response_style'] ?? 'concise',
+            'bot_temperature' => $membershipForPost['bot_temperature'] ?? 1.0,
+            'bot_top_p' => $membershipForPost['bot_top_p'] ?? 0.95,
+            'bot_top_k' => $membershipForPost['bot_top_k'] ?? 64,
+            'bot_context_messages' => $membershipForPost['bot_context_messages'] ?? 100,
+            'bot_max_reply_chars' => $membershipForPost['bot_max_reply_chars'] ?? 5000,
         ] : null);
         if (!$team) {
             $_SESSION['flash'] = 'Create or join a team first.';
@@ -1113,6 +1218,16 @@ try {
         $isOwnerForPost = $ownedTeamForPost && (int) $ownedTeamForPost['id'] === (int) $team['id'];
 
         $canManageTeamKeys = ((int) $team['owner_user_id'] === (int) $user['id']) || ($membershipForPost && (int) $membershipForPost['team_id'] === (int) $team['id'] && (int) ($membershipForPost['can_manage_api_keys'] ?? 0) === 1);
+
+        if (isset($_POST['update_team_bot_settings'])) {
+            if (!$isOwnerForPost) { $_SESSION['flash'] = 'Only the team owner can update bot settings.'; redirect_to(team_return_url($team)); }
+            $beforeBot = team_bot_settings($team);
+            update_team_bot_settings((int) $team['id'], $_POST);
+            $afterBot = fetch_team_bot_settings((int) $team['id']);
+            log_team_change((int) $team['id'], (int) $user['id'], 'Bot settings updated', 'team', (int) $team['id'], (string) $team['name'], 'Bot ' . $beforeBot['name'] . ' / ' . $beforeBot['mention'] . ' → ' . $afterBot['name'] . ' / ' . $afterBot['mention'] . '.');
+            $_SESSION['flash'] = 'Team bot settings updated.';
+            redirect_to(team_return_url($team));
+        }
 
         if (isset($_POST['create_team_api_key'])) {
             if (!$canManageTeamKeys) { $_SESSION['flash'] = 'You do not have permission to manage team API keys.'; redirect_to(team_return_url($team)); }
@@ -1220,17 +1335,19 @@ try {
             $canCreate = isset($_POST['can_create_conversations']) ? 1 : 0;
             $canViewKeys = isset($_POST['can_view_api_keys']) ? 1 : 0;
             $canManageKeys = isset($_POST['can_manage_api_keys']) ? 1 : 0;
+            $canInteractWithBot = isset($_POST['can_interact_with_bot']) ? 1 : 0;
             if ($canManageKeys) $canViewKeys = 1;
             if ($memberId > 0) {
-                $beforeMember = db_fetch_one('SELECT tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, tm.can_view_api_keys, tm.can_manage_api_keys, u.username FROM team_members tm INNER JOIN users u ON u.id = tm.user_id WHERE tm.id = ? AND tm.team_id = ? AND tm.role != "owner" LIMIT 1', 'ii', [$memberId, (int) $team['id']]);
-                db_execute('UPDATE team_members SET role = ?, can_read = ?, can_send_messages = ?, can_create_conversations = ?, can_view_api_keys = ?, can_manage_api_keys = ? WHERE id = ? AND team_id = ? AND role != "owner"', 'siiiiiii', [$role, $canRead, $canSend, $canCreate, $canViewKeys, $canManageKeys, $memberId, (int) $team['id']]);
+                $beforeMember = db_fetch_one('SELECT tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, tm.can_view_api_keys, tm.can_manage_api_keys, COALESCE(tm.can_interact_with_bot, 1) AS can_interact_with_bot, u.username FROM team_members tm INNER JOIN users u ON u.id = tm.user_id WHERE tm.id = ? AND tm.team_id = ? AND tm.role != "owner" LIMIT 1', 'ii', [$memberId, (int) $team['id']]);
+                db_execute('UPDATE team_members SET role = ?, can_read = ?, can_send_messages = ?, can_create_conversations = ?, can_view_api_keys = ?, can_manage_api_keys = ?, can_interact_with_bot = ? WHERE id = ? AND team_id = ? AND role != "owner"', 'siiiiiiii', [$role, $canRead, $canSend, $canCreate, $canViewKeys, $canManageKeys, $canInteractWithBot, $memberId, (int) $team['id']]);
                 if ($beforeMember) {
                     $details = 'Role ' . (string) $beforeMember['role'] . ' → ' . $role
                         . '; read ' . bool_word((int) $beforeMember['can_read']) . ' → ' . bool_word($canRead)
                         . '; send ' . bool_word((int) $beforeMember['can_send_messages']) . ' → ' . bool_word($canSend)
                         . '; create ' . bool_word((int) $beforeMember['can_create_conversations']) . ' → ' . bool_word($canCreate)
                         . '; view keys ' . bool_word((int) $beforeMember['can_view_api_keys']) . ' → ' . bool_word($canViewKeys)
-                        . '; manage keys ' . bool_word((int) $beforeMember['can_manage_api_keys']) . ' → ' . bool_word($canManageKeys) . '.';
+                        . '; manage keys ' . bool_word((int) $beforeMember['can_manage_api_keys']) . ' → ' . bool_word($canManageKeys)
+                        . '; bot access ' . bool_word((int) ($beforeMember['can_interact_with_bot'] ?? 1)) . ' → ' . bool_word($canInteractWithBot) . '.';
                     log_team_change((int) $team['id'], (int) $user['id'], 'Member permissions updated', 'member', $memberId, (string) $beforeMember['username'], $details);
                 }
                 $_SESSION['flash'] = 'Team member updated.';
@@ -1305,6 +1422,16 @@ if ($requestedTeamToken !== '') {
             'owner_user_id' => $userTeamMembership['owner_user_id'],
             'token' => $userTeamMembership['token'],
             'created_at' => $userTeamMembership['created_at'],
+            'bot_enabled' => $userTeamMembership['bot_enabled'] ?? 1,
+            'bot_name' => $userTeamMembership['bot_name'] ?? 'AI',
+            'bot_mention' => $userTeamMembership['bot_mention'] ?? '@AI',
+            'bot_custom_prompt' => $userTeamMembership['bot_custom_prompt'] ?? '',
+            'bot_response_style' => $userTeamMembership['bot_response_style'] ?? 'concise',
+            'bot_temperature' => $userTeamMembership['bot_temperature'] ?? 1.0,
+            'bot_top_p' => $userTeamMembership['bot_top_p'] ?? 0.95,
+            'bot_top_k' => $userTeamMembership['bot_top_k'] ?? 64,
+            'bot_context_messages' => $userTeamMembership['bot_context_messages'] ?? 100,
+            'bot_max_reply_chars' => $userTeamMembership['bot_max_reply_chars'] ?? 5000,
         ];
         $activeMembership = $userTeamMembership;
         $isTeamOwner = ((int) $userTeamMembership['owner_user_id'] === (int) $user['id']) || ((string) ($userTeamMembership['role'] ?? '') === 'owner');
@@ -1323,6 +1450,16 @@ if (!$activeTeam && $userTeamMembership) {
         'owner_user_id' => $userTeamMembership['owner_user_id'],
         'token' => $userTeamMembership['token'],
         'created_at' => $userTeamMembership['created_at'],
+        'bot_enabled' => $userTeamMembership['bot_enabled'] ?? 1,
+        'bot_name' => $userTeamMembership['bot_name'] ?? 'AI',
+        'bot_mention' => $userTeamMembership['bot_mention'] ?? '@AI',
+        'bot_custom_prompt' => $userTeamMembership['bot_custom_prompt'] ?? '',
+        'bot_response_style' => $userTeamMembership['bot_response_style'] ?? 'concise',
+        'bot_temperature' => $userTeamMembership['bot_temperature'] ?? 1.0,
+        'bot_top_p' => $userTeamMembership['bot_top_p'] ?? 0.95,
+        'bot_top_k' => $userTeamMembership['bot_top_k'] ?? 64,
+        'bot_context_messages' => $userTeamMembership['bot_context_messages'] ?? 100,
+        'bot_max_reply_chars' => $userTeamMembership['bot_max_reply_chars'] ?? 5000,
     ];
     $activeMembership = $userTeamMembership;
     $isTeamOwner = ((int) $userTeamMembership['owner_user_id'] === (int) $user['id']) || ((string) ($userTeamMembership['role'] ?? '') === 'owner');
@@ -1369,6 +1506,7 @@ function render_team_header(string $activePage, string $title, string $subtitle)
         'members' => ['Members', 'fa-user-group'],
         'conversations' => ['Conversations', 'fa-comments'],
         'api-keys' => ['API keys', 'fa-key'],
+        'bot-settings' => ['Bot Settings', 'fa-robot'],
         'activity' => ['Activity', 'fa-clock-rotate-left'],
         'settings' => ['Settings', 'fa-gear'],
     ];

@@ -9,6 +9,7 @@ $canManageChat = false;
 $teamChatMessages = [];
 $lastTeamChatId = 0;
 $teamMentionUsers = [];
+$teamBotSettings = team_bot_settings($activeTeam);
 
 if ($activeTeam) {
     $canReadChat = can_read_team_chat($activeTeam, $activeMembership, $user);
@@ -200,7 +201,7 @@ if ($activeTeam) {
             <div class="textarea-wrap">
               <label class="composer-label" for="teamChatMessage">Message <?= e((string) $activeTeam['name']) ?></label>
               <div class="message-input-shell" id="teamChatInputShell">
-                <textarea id="teamChatMessage" name="message" rows="1" placeholder="Send a message to your team..." <?= $canSendChat ? '' : 'disabled' ?>></textarea>
+                <textarea id="teamChatMessage" name="message" rows="1" placeholder="Send a message to your team<?= $teamBotSettings['enabled'] ? ' · mention ' . e((string) $teamBotSettings['mention']) . ' for ' . e((string) $teamBotSettings['name']) : '' ?>..." <?= $canSendChat ? '' : 'disabled' ?>></textarea>
                 <div class="mention-picker" id="teamMentionPicker" role="listbox" aria-label="Mention suggestions"></div>
               </div>
             </div>
@@ -237,9 +238,9 @@ if ($activeTeam) {
       </div>
 
   <?php if ($canReadChat): ?>
-<script type="application/json" id="teamMentionUsersJson"><?= json_encode(array_merge([
-    ['username' => 'AI', 'mention' => '@AI', 'kind' => 'ai'],
-], array_map(static function (array $member): array {
+<script type="application/json" id="teamMentionUsersJson"><?= json_encode(array_merge($teamBotSettings['enabled'] ? [[
+    'username' => (string) $teamBotSettings['name'], 'mention' => (string) $teamBotSettings['mention'], 'kind' => 'ai'
+]] : [], array_map(static function (array $member): array {
     return [
         'username' => (string) ($member['username'] ?? 'Team member'),
         'mention' => '@' . (string) ($member['username'] ?? 'Team member'),
@@ -611,7 +612,7 @@ const bootTeamChat = () => {
 
   const streamAiReply = async (stream) => {
     if (!stream || !stream.message_id || !stream.prompt) return;
-    setStatus(true, 'AI typing');
+    setStatus(true, '<?= e((string) $teamBotSettings['name']) ?> typing');
     const body = new URLSearchParams();
     body.set('message_id', String(stream.message_id));
     body.set('prompt', String(stream.prompt));

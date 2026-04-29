@@ -2,7 +2,7 @@
 
 # ♜ RookGPT
 
-### A self-hosted AI chat workspace for teams, APIs, admin control, 2FA, and multiple AI providers.
+### A self-hosted AI chat workspace with teams chat, configurable plans, APIs, admin control, 2FA, and multiple AI providers.
 
 ![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-Database-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
@@ -15,6 +15,8 @@
 ![API](https://img.shields.io/badge/API-ready-purple?style=flat-square)
 ![2FA](https://img.shields.io/badge/2FA-supported-orange?style=flat-square)
 ![Teams](https://img.shields.io/badge/teams-supported-success?style=flat-square)
+![Plans](https://img.shields.io/badge/plans-configurable-indigo?style=flat-square)
+![Promo Codes](https://img.shields.io/badge/promo--codes-supported-pink?style=flat-square)
 
 </div>
 
@@ -22,7 +24,7 @@
 
 ## ✨ Overview
 
-**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, subscriptions, team workspaces, API keys, configurable 2FA-protected team access, admin controls, and a simple authenticated chat API.
+**RookGPT** is a self-hosted AI chat workspace built with PHP and MySQL. It provides a polished ChatGPT-style interface, user accounts, configurable subscriptions, team chat, team bot customisation, API keys, 2FA-protected team access, admin controls, promo codes, and a simple authenticated chat API.
 
 The app can run against a local Ollama model or a hosted AI provider such as **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, **Cohere**, **Groq**, **Perplexity**, **xAI**, or **OpenRouter**.
 
@@ -35,14 +37,21 @@ The app can run against a local Ollama model or a hosted AI provider such as **O
 - 👤 User registration and login
 - 🔐 Single-session enforcement to prevent the same user account being active across multiple devices at once
 - 🛡️ Two-factor authentication using authenticator apps and recovery codes
-- 👥 Teams area with members, conversations, activity, settings, and team API keys
-- 🔑 Team API access can be gated behind 2FA from `/admin/settings`
+- 👥 Teams area with members, conversations, activity, settings, API keys, and bot settings
+- 🤖 Team chat bot powered by the same AI provider/model as the main chat
+- 🧩 Team bot customisation with bot name, mention trigger, prompt, style, temperature, Top P, Top K, context size, and reply length controls
+- ⌨️ Live “user is typing” indicators in team chat
+- ✅ Per-member permission to allow or block bot interaction
+- 🔑 Team API key management with copy support
 - 🧾 User API key management with masked key previews
+- 📊 API usage tracking with support for excluding internal ChatBot keys from stats
 - 🌐 Public JSON chat endpoint at `/api`
 - 📚 API dashboard, docs, playground, usage charts, and key management pages
-- 🧰 Admin dashboard for users, plans, API keys, notifications, activity logs, and app settings
+- 🧰 Admin dashboard for users, plans, promo codes, API keys, notifications, activity logs, and app settings
+- 💼 Fully configurable plan management from `/admin/prices`
+- 🏷️ Promo-code management from `/admin/promo`
+- 💳 Stripe checkout support with automatic zero-total upgrades when the payable subtotal is £0.00
 - 🪄 Installer wizard that writes `config/app.php`, imports the schema, creates the owner admin, and signs the admin in
-- 💳 Stripe secret key support for upgrade/checkout wiring
 - 🔗 Extensionless routes through `.htaccess`
 
 ## 🧱 Tech Stack
@@ -55,6 +64,7 @@ The app can run against a local Ollama model or a hosted AI provider such as **O
 | UI | Bootstrap, Font Awesome |
 | Charts | Chart.js |
 | AI | Ollama or hosted AI provider |
+| Payments | Stripe checkout support |
 
 ## ✅ Requirements
 
@@ -135,6 +145,8 @@ defined('APP_NAME') || define('APP_NAME', 'RookGPT');
 defined('APP_TAGLINE') || define('APP_TAGLINE', 'Professional AI assistant');
 ```
 
+Plan definitions are also stored in `config/app.php` using `ROOK_PLAN_DEFINITIONS`, allowing custom plan names, prices, limits, and feature gates.
+
 Then import the schema:
 
 ```bash
@@ -167,6 +179,8 @@ The installer and admin settings page can fetch available models from the select
 | `/` | Main chat app |
 | `/install/` | Installation wizard |
 | `/admin/` | Admin dashboard |
+| `/admin/prices` | Plan and pricing management |
+| `/admin/promo` | Promo-code management |
 | `/api/` | API dashboard |
 | `/api` | JSON chat API endpoint |
 | `/api/docs` | API documentation |
@@ -174,6 +188,10 @@ The installer and admin settings page can fetch available models from the select
 | `/api/keys` | API key management |
 | `/api/usage` | API usage analytics |
 | `/teams/` | Teams dashboard |
+| `/teams/chat` | Team chat |
+| `/teams/members` | Team member management |
+| `/teams/bot-settings` | Team bot customisation |
+| `/teams/api-keys` | Team API key management |
 | `/upgrade` | Upgrade/cart page |
 | `/share` | Shared conversation route |
 | `/terms` | Terms of Service |
@@ -232,18 +250,106 @@ curl -X POST https://your-domain.com/api \
 | `top_k` | integer | No | Ollama option; defaults to `64` |
 | `think` | boolean | No | Enables model thinking output when supported |
 
-## 💼 Plans and API Limits
+## 💼 Plans, Pricing, and Feature Gates
 
-The app currently recognises these plan levels:
+Plans are configurable from:
 
-| Plan | API access | Daily API calls |
-|---|---:|---:|
-| Free | No | 0 |
-| Plus | No | 0 |
-| Pro | Yes | 1,000 |
-| Business | Yes | Unlimited |
+```text
+/admin/prices
+```
 
-Admin users can manage user plans from the admin area.
+Admin users can:
+
+- Add plans
+- Edit plans
+- Disable plans
+- Delete plans
+- Set plan labels, slugs, prices, descriptions, and display order
+- Configure usage limits
+- Control feature gates per plan
+
+Supported feature gates include:
+
+| Feature | Configurable |
+|---|---:|
+| Thinking/reasoning | Yes |
+| API access | Yes |
+| API daily calls | Yes |
+| AI personality controls | Yes |
+| Conversation rename | Yes |
+| Share snapshots | Yes |
+| Teams access | Yes |
+| Team sharing | Yes |
+| Message limits | Yes |
+| Conversation limits | Yes |
+
+Disabled plans are hidden from the upgrade modal and upgrade comparison table.
+
+Deleting a plan can move affected users back to Free and disable promo codes targeting that plan.
+
+## 🏷️ Promo Codes
+
+Promo codes can be managed from:
+
+```text
+/admin/promo
+```
+
+Promo codes can be used during upgrade checkout and may support:
+
+- Percentage discounts
+- Fixed-value discounts
+- Plan-specific targeting
+- Enable/disable state
+- Usage tracking
+
+If the final payable upgrade subtotal is `£0.00`, the account is upgraded immediately without sending the user to Stripe.
+
+## 👥 Teams
+
+The teams area includes:
+
+- Team dashboard
+- Team chat
+- Members
+- Conversations
+- Activity
+- Settings
+- Bot Settings
+- Team API keys
+
+Team features can require 2FA when enabled from `/admin/settings`.
+
+## 🤖 Team Bot Settings
+
+Team bot customisation is available from:
+
+```text
+/teams/bot-settings
+```
+
+The team bot uses the same configured AI provider and model as the main chat. It does not require a team API key.
+
+Configurable options include:
+
+- Bot enabled/disabled state
+- Bot name
+- Mention trigger
+- Custom prompt
+- Response style
+- Temperature
+- Top P
+- Top K
+- Context message count
+- Max reply characters
+
+Team owners can also control whether each member can interact with the bot from:
+
+```text
+/teams/members
+```
+
+Members without bot permission can still send normal team messages, but bot mentions will not trigger a response.
 
 ## 🔐 Two-Factor Authentication
 
@@ -254,12 +360,12 @@ Team features can require 2FA when enabled in `/admin/settings`. Users can enabl
 ## 📁 Project Structure
 
 ```text
-admin/                 Admin dashboard pages
+admin/                 Admin dashboard pages, plan management, promo codes
 api/                   API dashboard, docs, keys, playground, usage
 config/                App configuration
 install/               Web installer
-lib/                   Shared provider, security, image, and install helpers
-teams/                 Team workspace pages
+lib/                   Shared provider, plan, security, image, and install helpers
+teams/                 Team workspace, chat, bot settings, members, API keys
 api.php                Public JSON API endpoint
 index.php              Main chat application
 rook.css               Shared app styling
@@ -279,6 +385,8 @@ privacy.php            Privacy page
 - Keep PHP, MySQL/MariaDB, Apache, and dependencies updated.
 - Ensure uploads are served safely and only expected image MIME types are accepted.
 - Restrict access to `/install/` after setup.
+- Rotate exposed API keys or secrets immediately.
+- Do not commit production `config/app.php` files.
 
 ## 🧪 Development Notes
 
@@ -287,6 +395,9 @@ privacy.php            Privacy page
 - `/api` is intentionally the JSON endpoint, while `/api/` is the web dashboard.
 - Explicit `.php` browser requests are redirected to extensionless URLs for cleaner routes.
 - Provider model fetching is handled in `lib/ai_providers.php`.
+- Plan logic is centralised through shared plan helpers.
+- Team bot replies use the app’s configured AI provider directly.
+- Internal API keys named `ChatBot` can be excluded from API usage stats.
 
 ## 🤝 Contributing
 
@@ -296,8 +407,10 @@ Before opening a pull request:
 
 1. Test the installer.
 2. Test login, registration, and chat.
-3. Check that `/api` still requires a valid bearer token.
-4. Make sure no secrets are committed.
+3. Test plan upgrades, disabled plans, and promo codes.
+4. Test team chat, typing indicators, bot settings, and member bot permissions.
+5. Check that `/api` still requires a valid bearer token.
+6. Make sure no secrets are committed.
 
 ## 📜 License
 

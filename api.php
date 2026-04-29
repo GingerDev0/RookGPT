@@ -146,6 +146,11 @@ function bearer_token(): string
     return '';
 }
 
+function api_key_logs_stats(array $key): bool
+{
+        return strcasecmp(trim((string) ($key['name'] ?? '')), 'ChatBot') !== 0;
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     json_response(['ok' => false, 'error' => 'POST only'], 405);
 }
@@ -171,6 +176,8 @@ if (api_teams_require_2fa() && !empty($key['team_id']) && (empty($key['two_facto
     json_response(['ok' => false, 'error' => 'Team API access requires 2FA on the owning account'], 403);
 }
 
+$logApiStats = api_key_logs_stats($key);
+
 $plan = (string) ($key['plan'] ?? 'free');
 $limits = plan_limits($plan);
 if (empty($limits['api_access'])) {
@@ -178,7 +185,7 @@ if (empty($limits['api_access'])) {
 }
 
 $today = date('Y-m-d');
-if ((int) ($limits['api_call_limit'] ?? 0) > 0) {
+if ($logApiStats && (int) ($limits['api_call_limit'] ?? 0) > 0) {
     $usage = fetch_one(
         'SELECT COUNT(*) AS total FROM api_logs WHERE user_id = ? AND DATE(created_at) = ?',
         'is',
@@ -214,29 +221,33 @@ $payload = rook_ai_payload(build_prompt_messages($messages, $systemPrompt), fals
 try {
     $aiResponse = rook_ai_post_json($payload, 600);
 } catch (Throwable $e) {
-    execute_sql(
-        'INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-        'iiisi',
-        [(int) $key['user_id'], (int) ($key['team_id'] ?? 0) ?: null, (int) $key['id'], '/api', 502]
-    );
+    if ($logApiStats) {
+        execute_sql(
+            'INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
+            'iiisi',
+            [(int) $key['user_id'], (int) ($key['team_id'] ?? 0) ?: null, (int) $key['id'], '/api', 502]
+        );
+    }
     json_response(['ok' => false, 'error' => $e->getMessage()], 502);
 }
 
 $usageCounts = rook_ai_usage_from_response($aiResponse);
 execute_sql('UPDATE api_keys SET last_used_at = NOW() WHERE id = ?', 'i', [(int) $key['id']]);
-execute_sql(
-    'INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, prompt_eval_count, eval_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
-    'iiisiii',
-    [
-        (int) $key['user_id'],
-        (int) ($key['team_id'] ?? 0) ?: null,
-        (int) $key['id'],
-        '/api',
-        200,
-        $usageCounts['prompt_eval_count'],
-        $usageCounts['eval_count'],
-    ]
-);
+if ($logApiStats) {
+    execute_sql(
+        'INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, prompt_eval_count, eval_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+        'iiisiii',
+        [
+            (int) $key['user_id'],
+            (int) ($key['team_id'] ?? 0) ?: null,
+            (int) $key['id'],
+            '/api',
+            200,
+            $usageCounts['prompt_eval_count'],
+            $usageCounts['eval_count'],
+        ]
+    );
+}
 
 json_response([
     'ok' => true,

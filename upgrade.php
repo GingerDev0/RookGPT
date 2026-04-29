@@ -468,6 +468,39 @@ function create_checkout_session(array $user, string $selectedPlan, string $peri
     return $url;
 }
 
+function complete_plan_upgrade(array $user, string $planSlug, string $period, array $plans, int $promoCodeId = 0, string $redemptionReference = ''): string
+{
+    if (!isset($plans[$planSlug])) {
+        throw new RuntimeException('Unknown upgrade plan.');
+    }
+
+    $period = normalise_period($period);
+    $periods = billing_periods();
+    $months = (int) $periods[$period]['months'];
+
+    db_execute(
+        "UPDATE users
+         SET plan = ?, thinking_enabled = 1, plan_billing_period = ?, plan_expires_at = DATE_ADD(NOW(), INTERVAL ? MONTH)
+         WHERE id = ?",
+        'ssii',
+        [$planSlug, $period, $months, (int) $user['id']]
+    );
+
+    if ($promoCodeId > 0) {
+        if ($redemptionReference === '') {
+            $redemptionReference = 'local_zero_' . (int) $user['id'] . '_' . bin2hex(random_bytes(12));
+        }
+        db_execute('UPDATE promo_codes SET redeemed_count = redeemed_count + 1 WHERE id = ?', 'i', [$promoCodeId]);
+        db_execute(
+            'INSERT IGNORE INTO promo_code_redemptions (promo_code_id, user_id, stripe_session_id) VALUES (?, ?, ?)',
+            'iis',
+            [$promoCodeId, (int) $user['id'], $redemptionReference]
+        );
+    }
+
+    return (string) $plans[$planSlug]['label'];
+}
+
 function verify_checkout_session_and_upgrade(array $user, array $plans): string
 {
     $sessionId = (string) ($_GET['session_id'] ?? '');
@@ -494,26 +527,7 @@ function verify_checkout_session_and_upgrade(array $user, array $plans): string
         throw new RuntimeException('Stripe checkout is not complete yet.');
     }
 
-    $periods = billing_periods();
-    $months = (int) $periods[$period]['months'];
-    db_execute(
-        "UPDATE users
-         SET plan = ?, thinking_enabled = 1, plan_billing_period = ?, plan_expires_at = DATE_ADD(NOW(), INTERVAL ? MONTH)
-         WHERE id = ?",
-        'ssii',
-        [$planSlug, $period, $months, (int) $user['id']]
-    );
-
-    if ($promoCodeId > 0) {
-        db_execute('UPDATE promo_codes SET redeemed_count = redeemed_count + 1 WHERE id = ?', 'i', [$promoCodeId]);
-        db_execute(
-            'INSERT IGNORE INTO promo_code_redemptions (promo_code_id, user_id, stripe_session_id) VALUES (?, ?, ?)',
-            'iis',
-            [$promoCodeId, (int) $user['id'], $sessionId]
-        );
-    }
-
-    return (string) $plans[$planSlug]['label'];
+    return complete_plan_upgrade($user, $planSlug, $period, $plans, $promoCodeId, $sessionId);
 }
 
 $plans = rook_enabled_paid_plans();
@@ -553,6 +567,11 @@ if ($promoInput !== '') {
     }
 }
 
+$discount = $promo ? ((int) $promo['discount_pence'] / 100) : 0.0;
+$planCreditAmount = $planCreditPence / 100;
+$total = max(0, $subtotal - $planCreditAmount - $discount);
+$totalPence = max(0, (int) round($total * 100));
+
 if (isset($_GET['stripe_success'])) {
     try {
         $upgradedLabel = verify_checkout_session_and_upgrade($user, $plans);
@@ -585,6 +604,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_upgrade'])) {
             throw new RuntimeException($stripeError !== '' ? $stripeError : 'That promo code could not be applied.');
         }
 
+        if ($subtotalPence <= 0 || $totalPence <= 0) {
+            $upgradedLabel = complete_plan_upgrade($user, $selectedPlan, $period, $plans, $promo ? (int) $promo['id'] : 0);
+            $_SESSION['flash'] = 'Account upgraded to ' . $upgradedLabel . '. No payment was required.';
+            header('Location: index.php');
+            exit;
+        }
+
         $checkoutUrl = create_checkout_session($user, $selectedPlan, $period, $plan, $promo, $planCredit);
         header('Location: ' . $checkoutUrl, true, 303);
         exit;
@@ -593,9 +619,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_upgrade'])) {
     }
 }
 
-$discount = $promo ? ((int) $promo['discount_pence'] / 100) : 0.0;
-$planCreditAmount = $planCreditPence / 100;
-$total = max(0, $subtotal - $planCreditAmount - $discount);
 $periods = billing_periods();
 $periodLabel = (string) $periods[$period]['label'];
 $periodSuffix = (string) $periods[$period]['suffix'];

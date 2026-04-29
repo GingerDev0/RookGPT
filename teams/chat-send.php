@@ -21,7 +21,9 @@ if ($message === '') {
 
 $teamId = (int) $activeTeam['id'];
 $userId = (int) $user['id'];
-$aiPrompt = team_chat_ai_trigger($message);
+$botSettings = team_bot_settings($activeTeam);
+$aiPrompt = team_chat_ai_trigger($message, $activeTeam);
+$botInteractionAllowed = can_interact_with_team_bot($activeTeam, $activeMembership, $user);
 $aiMessage = null;
 $aiError = '';
 
@@ -40,12 +42,11 @@ if (!$created) {
 
 $aiStream = null;
 if ($aiPrompt !== null) {
-    try {
-        $keyState = team_chat_ai_key_plaintext($teamId);
-        if (empty($keyState['ok'])) {
-            $aiMessage = create_team_chat_message($teamId, $userId, (string) $keyState['message'], true, 'AI');
-        } else {
-            $aiMessage = create_team_chat_message($teamId, $userId, 'Thinking…', true, 'AI');
+    if (!$botInteractionAllowed) {
+        $aiError = 'You do not have permission to interact with the team bot.';
+    } else {
+        try {
+            $aiMessage = create_team_chat_message($teamId, $userId, 'Thinking…', true, (string) $botSettings['name']);
             if ($aiMessage) {
                 $aiStream = [
                     'message_id' => (int) $aiMessage['id'],
@@ -54,12 +55,12 @@ if ($aiPrompt !== null) {
             } else {
                 $aiError = 'AI response placeholder could not be saved.';
             }
+        } catch (Throwable $e) {
+            $aiError = 'AI response failed: ' . $e->getMessage();
+            try {
+                $aiMessage = create_team_chat_message($teamId, $userId, $aiError, true, (string) $botSettings['name']);
+            } catch (Throwable $ignored) {}
         }
-    } catch (Throwable $e) {
-        $aiError = 'AI response failed: ' . $e->getMessage();
-        try {
-            $aiMessage = create_team_chat_message($teamId, $userId, $aiError, true, 'AI');
-        } catch (Throwable $ignored) {}
     }
 }
 

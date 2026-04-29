@@ -101,6 +101,11 @@ function playground_key_from_ref(int $viewerUserId, string $keyRef, string $plai
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') playground_json(['ok' => false, 'error' => 'POST only'], 405);
+function playground_key_logs_stats(array $key): bool
+{
+    return strcasecmp(trim((string) ($key["name"] ?? "")), "ChatBot") !== 0;
+}
+
 $input = json_decode(file_get_contents('php://input') ?: '', true);
 if (!is_array($input)) playground_json(['ok' => false, 'error' => 'Invalid JSON body'], 400);
 
@@ -108,9 +113,11 @@ $key = playground_key_from_ref((int)$user['id'], trim((string)($input['key_ref']
 if (!$key || !empty($key['revoked_at'])) playground_json(['ok' => false, 'error' => 'Invalid API key'], 401);
 if (api_teams_require_2fa() && !empty($key['team_id']) && (empty($key['two_factor_enabled_at']) || empty($key['two_factor_secret']))) playground_json(['ok' => false, 'error' => 'Team API access requires 2FA on the owning account'], 403);
 
+$logApiStats = playground_key_logs_stats($key);
+
 $limits = plan_limits((string)($key['plan'] ?? 'free'));
 if (empty($limits['api_access'])) playground_json(['ok' => false, 'error' => 'API access is not available on this plan'], 403);
-if ((int)($limits['api_call_limit'] ?? 0) > 0) {
+if ($logApiStats && (int)($limits['api_call_limit'] ?? 0) > 0) {
     $usage = db_fetch_one('SELECT COUNT(*) AS total FROM api_logs WHERE user_id = ? AND DATE(created_at) = CURDATE()', 'i', [(int)$key['user_id']]);
     if ((int)($usage['total'] ?? 0) >= (int)$limits['api_call_limit']) playground_json(['ok' => false, 'error' => 'Daily API call limit reached for this plan'], 429);
 }
@@ -132,13 +139,17 @@ $payload = rook_ai_payload(playground_build_prompt_messages($messages, $systemPr
 try {
     $aiResponse = rook_ai_post_json($payload, 600);
 } catch (Throwable $e) {
-    db_execute('INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, created_at) VALUES (?, ?, ?, ?, ?, NOW())', 'iiisi', [(int)$key['user_id'], (int)($key['team_id'] ?? 0) ?: null, (int)$key['id'], '/api/playground', 502]);
+    if ($logApiStats) {
+        db_execute('INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, created_at) VALUES (?, ?, ?, ?, ?, NOW())', 'iiisi', [(int)$key['user_id'], (int)($key['team_id'] ?? 0) ?: null, (int)$key['id'], '/api/playground', 502]);
+    }
     playground_json(['ok' => false, 'error' => $e->getMessage()], 502);
 }
 
 $usageCounts = rook_ai_usage_from_response($aiResponse);
 db_execute('UPDATE api_keys SET last_used_at = NOW() WHERE id = ?', 'i', [(int)$key['id']]);
+if ($logApiStats) {
 db_execute('INSERT INTO api_logs (user_id, team_id, api_key_id, endpoint, status_code, prompt_eval_count, eval_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())', 'iiisiii', [(int)$key['user_id'], (int)($key['team_id'] ?? 0) ?: null, (int)$key['id'], '/api/playground', 200, $usageCounts['prompt_eval_count'], $usageCounts['eval_count']]);
+}
 
 playground_json([
     'ok' => true,

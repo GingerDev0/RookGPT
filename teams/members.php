@@ -34,6 +34,7 @@ if (!$activeTeam): ?>
               <label><input type="checkbox" name="can_create_conversations" value="1" <?= !empty($member['can_create_conversations']) ? 'checked' : '' ?> <?= (!$isTeamOwner || (($member['role'] ?? '') === 'owner')) ? 'disabled' : '' ?>> New conversations</label>
               <label><input type="checkbox" name="can_view_api_keys" value="1" <?= !empty($member['can_view_api_keys']) ? 'checked' : '' ?> <?= (!$isTeamOwner || (($member['role'] ?? '') === 'owner')) ? 'disabled' : '' ?>> View/use keys</label>
               <label><input type="checkbox" name="can_manage_api_keys" value="1" <?= !empty($member['can_manage_api_keys']) ? 'checked' : '' ?> <?= (!$isTeamOwner || (($member['role'] ?? '') === 'owner')) ? 'disabled' : '' ?>> Manage keys</label>
+              <label><input type="checkbox" name="can_interact_with_bot" value="1" <?= ((int) ($member['can_interact_with_bot'] ?? 1) === 1) ? 'checked' : '' ?> <?= (!$isTeamOwner || (($member['role'] ?? '') === 'owner')) ? 'disabled' : '' ?>> Interact with bot</label>
             </div>
             <?php if ($isTeamOwner && (($member['role'] ?? '') !== 'owner')): ?><button class="btn-ghost" type="submit" name="update_team_member" value="1">Save member</button><?php endif; ?>
           </form>

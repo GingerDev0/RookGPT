@@ -489,7 +489,7 @@ function fetch_owned_team(int $ownerUserId): ?array
 function fetch_team_members(int $teamId): array
 {
     return db_fetch_all(
-        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, tm.created_at, u.username, u.email
+        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, COALESCE(tm.can_interact_with_bot, 1) AS can_interact_with_bot, tm.created_at, u.username, u.email
          FROM team_members tm
          INNER JOIN users u ON u.id = tm.user_id
          WHERE tm.team_id = ?
@@ -502,7 +502,7 @@ function fetch_team_members(int $teamId): array
 function fetch_user_team_membership(int $userId): ?array
 {
     return db_fetch_one(
-        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, t.name AS team_name, t.token AS team_token, t.owner_user_id
+        'SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.can_read, tm.can_send_messages, tm.can_create_conversations, COALESCE(tm.can_interact_with_bot, 1) AS can_interact_with_bot, t.name AS team_name, t.token AS team_token, t.owner_user_id
          FROM team_members tm
          INNER JOIN teams t ON t.id = tm.team_id
          WHERE tm.user_id = ?
@@ -590,7 +590,7 @@ function create_team(int $ownerUserId, string $name): int
 function add_team_owner_membership(int $teamId, int $ownerUserId): void
 {
     db_execute(
-        'INSERT INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, created_at) VALUES (?, ?, "owner", 1, 1, 1, NOW())',
+        'INSERT INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, can_interact_with_bot, created_at) VALUES (?, ?, "owner", 1, 1, 1, 1, NOW())',
         'ii',
         [$teamId, $ownerUserId]
     );
@@ -730,7 +730,7 @@ function accept_team_invite(int $inviteId, int $userId): string
     if ($existingMembership) return 'You are already a member of ' . (string) $existingMembership['name'] . '.';
     $currentUser = db_fetch_one('SELECT username, plan, thinking_enabled FROM users WHERE id = ? LIMIT 1', 'i', [$userId]) ?: ['username' => 'a user', 'plan' => 'free', 'thinking_enabled' => 0];
     db_execute(
-        'INSERT INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, pre_team_plan, pre_team_thinking_enabled, created_at) VALUES (?, ?, ?, 1, 1, ?, ?, ?, NOW())',
+        'INSERT INTO team_members (team_id, user_id, role, can_read, can_send_messages, can_create_conversations, can_interact_with_bot, pre_team_plan, pre_team_thinking_enabled, created_at) VALUES (?, ?, ?, 1, 1, ?, 1, ?, ?, NOW())',
         'iisisi',
         [(int) $invite['team_id'], $userId, (string) $invite['role'], (int) $invite['can_create_conversations'], (string) ($currentUser['plan'] ?? 'free'), (int) ($currentUser['thinking_enabled'] ?? 0)]
     );
